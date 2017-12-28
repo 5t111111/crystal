@@ -1,3 +1,5 @@
+require "csv"
+
 # A token in a CSV. It consists of a `Kind` and a value.
 # The value only makes sense when the *kind* is `Cell`.
 struct CSV::Token
@@ -9,10 +11,10 @@ struct CSV::Token
   end
 
   # The `Kind`.
-  property kind
+  property kind : Kind
 
   # The string value. Only makes sense for a `Cell`.
-  property value
+  property value : String
 
   # :nodoc:
   def initialize
@@ -20,4 +22,3 @@ struct CSV::Token
     @value = ""
   end
 end
-

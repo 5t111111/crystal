@@ -30,21 +30,21 @@ struct Tape
 end
 
 class Program
-  def initialize(@chars, @bracket_map)
+  def initialize(@chars : Array(Char), @bracket_map : Hash(Int32, Int32))
   end
 
   def run
     tape = Tape.new
     pc = 0
-    while pc < @chars.length
+    while pc < @chars.size
       case @chars[pc]
-        when '>'; tape.advance
-        when '<'; tape.devance
-        when '+'; tape.inc
-        when '-'; tape.dec
-        when '.'; print! tape.get.chr
-        when '['; pc = @bracket_map[pc] if tape.get == 0
-        when ']'; pc = @bracket_map[pc] if tape.get != 0
+      when '>'; tape.advance
+      when '<'; tape.devance
+      when '+'; tape.inc
+      when '-'; tape.dec
+      when '.'; print tape.get.chr
+      when '['; pc = @bracket_map[pc] if tape.get == 0
+      when ']'; pc = @bracket_map[pc] if tape.get != 0
       end
       pc += 1
     end
@@ -75,15 +75,15 @@ class Program
 end
 
 text = if ARGV.size > 0
-  File.read(ARGV[0])
-else
-  " Benchmark brainf*ck program
->++[<+++++++++++++>-]<[[>+>+<<-]>[<+>-]++++++++
-[>++++++++<-]>.[-]<<>++++++++++[>++++++++++[>++
-++++++++[>++++++++++[>++++++++++[>++++++++++[>+
-+++++++++[-]<-]<-]<-]<-]<-]<-]<-]++++++++++.
-  "
-end
+         File.read(ARGV[0])
+       else
+         <<-PROGRAM
+         Benchmark brainf*ck program
+         >++[<+++++++++++++>-]<[[>+>+<<-]>[<+>-]++++++++
+         [>++++++++<-]>.[-]<<>++++++++++[>++++++++++[>++
+         ++++++++[>++++++++++[>++++++++++[>++++++++++[>+
+         +++++++++[-]<-]<-]<-]<-]<-]<-]<-]++++++++++.
+         PROGRAM
+       end
 
 Program.parse(text).run
-

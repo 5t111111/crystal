@@ -38,7 +38,7 @@ describe "Code gen: if" do
   end
 
   it "codegens if with int" do
-    run("require \"object\"; if 1; 2; else 3; end").to_i.should eq(2)
+    run("if 1; 2; else 3; end").to_i.should eq(2)
   end
 
   it "codegens if with nil" do
@@ -180,5 +180,110 @@ describe "Code gen: if" do
 
       foo
       ").to_i.should eq(2)
+  end
+
+  it "codegens bug #1729" do
+    run(%(
+      n = true ? 3 : 3.2
+      z = if n.is_a?(Float64) || false
+        0
+      else
+        n
+      end
+      z.to_i
+      )).to_i.should eq(3)
+  end
+
+  {% if flag?(:x86_64) %}
+    it "codegens if with pointer 0x100000000 pointer" do
+      run(%(
+        ptr = Pointer(Void).new(0x100000000_u64)
+        if ptr
+          1
+        else
+          2
+        end
+      )).to_i.should eq(1)
+    end
+  {% end %}
+
+  it "doesn't crash with if !var using var in else" do
+    run(%(
+      foo = nil
+      if !foo
+        1
+      else
+        foo
+      end
+      1
+      )).to_i.should eq(1)
+  end
+
+  it "doesn't crash with if !is_a? using var in then" do
+    run(%(
+      foo = 1
+      if !foo.is_a?(Int32)
+        foo
+      else
+        1
+      end
+      1
+      )).to_i.should eq(1)
+  end
+
+  it "restricts with || always falsey" do
+    run(%(
+      t = 1
+      if t.is_a?(String) || t.is_a?(String)
+        t
+      else
+        2
+      end
+      )).to_i.should eq(2)
+  end
+
+  it "considers or truthy/falsey right" do
+    run(%(
+      t = 1 || 'a'
+      if t.is_a?(Char) || t.is_a?(Char)
+        1
+      else
+        2
+      end
+      )).to_i.should eq(2)
+  end
+
+  it "codegens #3104" do
+    codegen(%(
+      def foo
+        yield
+      end
+
+      x = typeof(nil && 1)
+      foo do
+        if x
+        end
+      end
+      x
+      ))
+  end
+
+  it "doesn't generate truthy if branch if doesn't need value (bug)" do
+    codegen(%(
+      class Foo
+      end
+
+      x = nil
+      if x
+        nil
+      else
+        if 2 == 2
+          Foo.new
+        else
+          ""
+        end
+      end
+      1
+      ))
   end
 end

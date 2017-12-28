@@ -196,7 +196,7 @@ describe "Codegen: super" do
   it "codegens super inside closure" do
     run(%(
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo
@@ -218,7 +218,7 @@ describe "Codegen: super" do
   it "codegens super inside closure forwarding args" do
     run(%(
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo(z)
@@ -324,5 +324,120 @@ describe "Codegen: super" do
 
       (Base.new || Child.new).bar
       )).to_i.should eq(123)
+  end
+
+  it "doesn't invoke super twice in inherited generic types (#942)" do
+    run(%(
+      class Global
+        @@x = 0
+
+        def self.x=(@@x)
+        end
+
+        def self.x
+          @@x
+        end
+      end
+
+      abstract class Foo
+      end
+
+      class Bar(T) < Foo
+        def initialize
+            Global.x += 1
+            super
+        end
+      end
+
+      class Baz(T) < Bar(T)
+      end
+
+      Baz(Int8).new
+
+      Global.x
+      )).to_i.should eq(1)
+  end
+
+  it "calls super in metaclass (#1522)" do
+    # We include the prelude so this is codegened for real, because that's where the issue lies
+    run(%(
+      require "prelude"
+
+      class Global
+        @@x = 0
+
+        def self.x=(@@x)
+        end
+
+        def self.x
+          @@x
+        end
+      end
+
+      class Base
+        def self.foo
+          Global.x += 1
+        end
+      end
+
+      class One < Base
+        def self.foo
+          Global.x += 3
+          super
+        end
+      end
+
+      Base.foo
+      One.foo
+      )).to_i.should eq(5)
+  end
+
+  it "calls super with dispatch (#2318)" do
+    run(%(
+      class Foo
+        def foo(x : Int32)
+          x
+        end
+
+        def foo(x : Float64)
+          x
+        end
+      end
+
+      class Bar < Foo
+        def foo(obj)
+          super(obj)
+        end
+      end
+
+      z = Bar.new.foo(3 || 2.5)
+      z.to_i
+      )).to_i.should eq(3)
+  end
+
+  it "calls super from virtual metaclass type (#2841)" do
+    run(%(
+      require "prelude"
+
+      abstract class Foo
+        def self.bar(x : Bool)
+          x
+        end
+      end
+
+      class Bar < Foo
+        def self.bar(x : Bool)
+          super
+        end
+      end
+
+      class Baz < Foo
+        def self.bar(x : Bool)
+          super
+        end
+      end
+
+      (Foo || Bar).bar(true)
+      ))
   end
 end

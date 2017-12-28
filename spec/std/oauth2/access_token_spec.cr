@@ -18,7 +18,15 @@ class OAuth2::AccessToken
         })
 
       access_token = AccessToken.from_json(json)
-      access_token = access_token as Bearer
+      access_token = access_token.as(Bearer)
+      access_token.token_type.should eq("Bearer")
+      access_token.access_token.should eq(token_value)
+      access_token.expires_in.should eq(expires_in)
+      access_token.refresh_token.should eq(refresh_token)
+      access_token.scope.should eq(scope)
+
+      access_token = AccessToken::Bearer.from_json(json)
+      access_token = access_token.as(Bearer)
       access_token.token_type.should eq("Bearer")
       access_token.access_token.should eq(token_value)
       access_token.expires_in.should eq(expires_in)
@@ -37,6 +45,37 @@ class OAuth2::AccessToken
       request = HTTP::Request.new "GET", "/"
       token.authenticate request, false
       request.headers["Authorization"].should eq("Bearer access token")
+    end
+
+    it "builds from json without expires_in (#4041)" do
+      access_token = AccessToken.from_json(%({
+        "access_token" : "foo",
+        "token_type" : "Bearer",
+        "refresh_token" : "bar",
+        "scope" : "baz"
+        }))
+      access_token.expires_in.should be_nil
+    end
+
+    it "builds from json with unknown key (#4437)" do
+      token = AccessToken.from_json(%({
+        "access_token" : "foo",
+        "token_type" : "Bearer",
+        "refresh_token" : "bar",
+        "scope" : "baz",
+        "unknown": [1, 2, 3]
+        }))
+      token.extra.not_nil!["unknown"].should eq("[1,2,3]")
+    end
+
+    it "builds from json without token_type, assumes Bearer (#4503)" do
+      token = AccessToken.from_json(%({
+        "access_token" : "foo",
+        "refresh_token" : "bar",
+        "scope" : "baz"
+        }))
+      token.should be_a(AccessToken::Bearer)
+      token.access_token.should eq("foo")
     end
   end
 
@@ -59,7 +98,17 @@ class OAuth2::AccessToken
         })
 
       access_token = AccessToken.from_json(json)
-      access_token = access_token as Mac
+      access_token = access_token.as(Mac)
+      access_token.token_type.should eq("Mac")
+      access_token.access_token.should eq(token_value)
+      access_token.expires_in.should eq(expires_in)
+      access_token.refresh_token.should eq(refresh_token)
+      access_token.scope.should eq(scope)
+      access_token.mac_algorithm.should eq(mac_algorithm)
+      access_token.mac_key.should eq(mac_key)
+
+      access_token = AccessToken::Mac.from_json(json)
+      access_token = access_token.as(Mac)
       access_token.token_type.should eq("Mac")
       access_token.access_token.should eq(token_value)
       access_token.expires_in.should eq(expires_in)
@@ -79,7 +128,7 @@ class OAuth2::AccessToken
         "mac_key":"N-ATggO2ywqylWgIi3QZn40jWJmL2f9h6ZOGd3jqcxU"
         })
       access_token = AccessToken.from_json(json)
-      access_token = access_token as Mac
+      access_token = access_token.as(Mac)
       access_token.refresh_token.should be_nil
     end
 
@@ -93,7 +142,7 @@ class OAuth2::AccessToken
       headers = HTTP::Headers.new
       headers["Host"] = "localhost:4000"
 
-      token = Mac.new("3n2\b-YaAzH67YH9UJ-9CnJ_PS-vSy1MRLM-q7TZknPw", 3600, "hmac-sha-256", "i-pt1Lir-yAfUdXbt-AXM1gMupK7vDiOK1SZGWkASDc")
+      token = Mac.new("3n2-YaAzH67YH9UJ-9CnJ_PS-vSy1MRLM-q7TZknPw", 3600, "hmac-sha-256", "i-pt1Lir-yAfUdXbt-AXM1gMupK7vDiOK1SZGWkASDc")
       request = HTTP::Request.new "GET", "/some/resource.json", headers
       token.authenticate request, false
       auth = request.headers["Authorization"]

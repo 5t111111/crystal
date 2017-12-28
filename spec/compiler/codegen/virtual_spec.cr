@@ -257,6 +257,9 @@ describe "Code gen: virtual type" do
     run("
       require \"prelude\"
 
+      class Ref
+      end
+
       class Foo
         def foo
           bar self
@@ -268,7 +271,7 @@ describe "Code gen: virtual type" do
 
       class Baz < Foo
         def initialize
-          @x = Reference.new
+          @x = Ref.new
         end
 
         def x
@@ -289,9 +292,8 @@ describe "Code gen: virtual type" do
   end
 
   it "doesn't lookup in Value+ when virtual type is Object+" do
-    run("
-      require \"bool\"
-      require \"reference\"
+    run(%(
+      require "prelude"
 
       class Object
         def foo
@@ -304,7 +306,7 @@ describe "Code gen: virtual type" do
 
       a = Foo.new
       a.foo
-      ").to_b.should be_true
+      )).to_b.should be_true
   end
 
   it "correctly dispatch call with block when the obj is a virtual type" do
@@ -359,7 +361,7 @@ describe "Code gen: virtual type" do
     ").to_i.should eq(1)
   end
 
-  pending "calls class method 1" do
+  it "calls class method 1" do
     run("
       class Foo
         def self.foo
@@ -377,7 +379,7 @@ describe "Code gen: virtual type" do
       ").to_i.should eq(1)
   end
 
-  pending "calls class method 2" do
+  it "calls class method 2" do
     run("
       class Foo
         def self.foo
@@ -395,7 +397,7 @@ describe "Code gen: virtual type" do
       ").to_i.should eq(2)
   end
 
-  pending "calls class method 3" do
+  it "calls class method 3" do
     run("
       class Base
         def self.foo
@@ -479,7 +481,7 @@ describe "Code gen: virtual type" do
   it "codegens new for simple type, then for virtual" do
     run("
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def x
@@ -499,7 +501,7 @@ describe "Code gen: virtual type" do
   it "codegens new twice for virtual" do
     run("
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def x
@@ -621,5 +623,70 @@ describe "Code gen: virtual type" do
       reference = Bar.new || Baz.new
       reference.object_id == foo(reference)
       ").to_b.should be_true
+  end
+
+  it "codegens virtual method of abstract metaclass" do
+    run(%(
+      class Foo
+        def self.foo
+          1
+        end
+      end
+
+      abstract class Bar < Foo
+        def self.foo
+          2
+        end
+      end
+
+      class Baz < Foo
+        def self.foo
+          3
+        end
+      end
+
+      (Bar || Foo || Baz).foo
+      )).to_i.should eq(2)
+  end
+
+  it "codegens new for virtual class with one type" do
+    run(%(
+      abstract class Foo
+      end
+
+      class Bar < Foo
+        def foo
+          123
+        end
+      end
+
+      p = Pointer(Foo.class).malloc(1_u64)
+      p.value = Bar
+      p.value.new.foo
+      )).to_i.should eq(123)
+  end
+
+  it "codegens new for virtual class with two types" do
+    run(%(
+      abstract class Foo
+      end
+
+      class Bar < Foo
+        def foo
+          123
+        end
+      end
+
+      class Baz < Foo
+        def foo
+          456
+        end
+      end
+
+      p = Pointer(Foo.class).malloc(1_u64)
+      p.value = Bar
+      p.value = Baz
+      p.value.new.foo
+      )).to_i.should eq(456)
   end
 end

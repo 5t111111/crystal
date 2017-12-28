@@ -1,16 +1,43 @@
 class Crystal::Doc::Generator
-  getter program
+  getter program : Program
 
-  def initialize(@program, @included_dirs, @dir = "./doc")
-    @base_dir = `pwd`.chomp
+  @base_dir : String
+  @is_crystal_repo : Bool
+  @repository : String? = nil
+  getter repository_name = ""
+
+  # Adding a flag and associated css class will add support in parser
+  FLAG_COLORS = {
+    "BUG"        => "red",
+    "DEPRECATED" => "red",
+    "FIXME"      => "yellow",
+    "NOTE"       => "purple",
+    "OPTIMIZE"   => "green",
+    "TODO"       => "orange",
+  }
+  FLAGS = FLAG_COLORS.keys
+
+  GIT_REMOTE_PATTERNS = {
+    /github\.com(?:\:|\/)(?<user>(?:\w|-|_)+)\/(?<repo>(?:\w|-|_|\.)+?)(?:\.git)?\s/ => {
+      repository: "https://github.com/%{user}/%{repo}/blob/%{rev}",
+      repo_name:  "github.com/%{user}/%{repo}",
+    },
+    /gitlab\.com(?:\:|\/)(?<user>(?:\w|-|_|\.)+)\/(?<repo>(?:\w|-|_|\.)+?)(?:\.git)?\s/ => {
+      repository: "https://gitlab.com/%{user}/%{repo}/blob/%{rev}",
+      repo_name:  "gitlab.com/%{user}/%{repo}",
+    },
+  }
+
+  def initialize(@program : Program, @included_dirs : Array(String), @output_dir : String)
+    @base_dir = Dir.current.chomp
     @types = {} of Crystal::Type => Doc::Type
-    @is_crystal_repository = false
     @repo_name = ""
+    @is_crystal_repo = false
     compute_repository
   end
 
   def run
-    Dir.mkdir_p @dir
+    Dir.mkdir_p @output_dir
 
     types = collect_subtypes(@program)
 
@@ -22,9 +49,13 @@ class Crystal::Doc::Generator
     generate_docs program_type, types
   end
 
+  def program_type
+    type(@program)
+  end
+
   def generate_docs(program_type, types)
     copy_files
-    generate_types_docs types, @dir, types
+    generate_types_docs types, @output_dir, types
     generate_readme program_type, types
   end
 
@@ -36,50 +67,45 @@ class Crystal::Doc::Generator
     end
 
     if filename
-      body = File.read(filename)
+      raw_body = File.read(filename)
+      body = doc(program_type, raw_body)
     else
+      raw_body = ""
       body = ""
     end
 
-    body = String.build do |io|
-      Markdown.parse body, MarkdownDocRenderer.new(program_type, io)
-    end
+    File.write File.join(@output_dir, "index.html"), MainTemplate.new(body, types, repository_name)
 
-    write_template "#{@dir}/index.html", MainTemplate.new(body, types, repository_name)
+    main_index = Main.new(raw_body, Type.new(self, @program), repository_name)
+    File.write File.join(@output_dir, "index.json"), main_index
   end
 
   def copy_files
-    Dir.mkdir_p "#{@dir}/css"
-    Dir.mkdir_p "#{@dir}/js"
+    Dir.mkdir_p File.join(@output_dir, "css")
+    Dir.mkdir_p File.join(@output_dir, "js")
 
-    write_template "#{@dir}/css/style.css", StyleTemplate.new
-    write_template "#{@dir}/js/doc.js", JsTypeTemplate.new
+    File.write File.join(@output_dir, "css", "style.css"), StyleTemplate.new
+    File.write File.join(@output_dir, "js", "doc.js"), JsTypeTemplate.new
   end
 
   def generate_types_docs(types, dir, all_types)
     types.each do |type|
       if type.program?
-        filename = "#{dir}/toplevel.html"
+        filename = File.join(dir, "toplevel.html")
       else
-        filename = "#{dir}/#{type.name}.html"
+        filename = File.join(dir, "#{type.name}.html")
       end
 
-      write_template filename, TypeTemplate.new(type, all_types)
+      File.write filename, TypeTemplate.new(type, all_types)
 
       next if type.program?
 
       subtypes = type.types
       if subtypes && !subtypes.empty?
-        dirname = "#{dir}/#{type.name}"
+        dirname = File.join(dir, type.name)
         Dir.mkdir_p dirname
         generate_types_docs subtypes, dirname, all_types
       end
-    end
-  end
-
-  def write_template(filename, template)
-    File.open(filename, "w") do |file|
-      template.to_s file
     end
   end
 
@@ -87,18 +113,15 @@ class Crystal::Doc::Generator
     must_include? type.type
   end
 
-  def must_include?(type : Crystal::IncludedGenericModule)
-    must_include? type.module
-  end
-
-  def must_include?(type : Crystal::InheritedGenericClass)
-    must_include? type.extended_class
-  end
-
   def must_include?(type : Crystal::Type)
+    return false if type.private?
     return false if nodoc?(type)
+    return true if crystal_builtin?(type)
 
-    type.locations.any? do |type_location|
+    # Don't include lib types or types inside a lib type
+    return false if type.is_a?(Crystal::LibType) || type.namespace.is_a?(LibType)
+
+    type.locations.try &.any? do |type_location|
       must_include? type_location
     end
   end
@@ -108,10 +131,6 @@ class Crystal::Doc::Generator
   end
 
   def must_include?(a_def : Crystal::Def)
-    if @is_crystal_repository && (body = a_def.body).is_a?(Crystal::Primitive)
-      doc = Primitive.doc(a_def, body)
-      return !nodoc?(doc)
-    end
     return false if nodoc?(a_def)
 
     must_include? a_def.location
@@ -150,6 +169,24 @@ class Crystal::Doc::Generator
     nodoc? obj.doc.try &.strip
   end
 
+  def crystal_builtin?(type)
+    return false unless @is_crystal_repo
+    return false unless type.is_a?(Const) || type.is_a?(NonGenericModuleType)
+
+    crystal_type = @program.types["Crystal"]
+    return true if type == crystal_type
+
+    return false unless type.is_a?(Const)
+    return false unless type.namespace == crystal_type
+
+    {"BUILD_COMMIT", "BUILD_DATE", "CACHE_DIR", "DEFAULT_PATH",
+     "DESCRIPTION", "PATH", "VERSION", "LLVM_VERSION"}.each do |name|
+      return true if type == crystal_type.types[name]?
+    end
+
+    false
+  end
+
   def type(type)
     @types[type] ||= Type.new(self, type)
   end
@@ -165,7 +202,7 @@ class Crystal::Doc::Generator
   def collect_subtypes(parent)
     types = [] of Type
 
-    parent.types.each_value do |type|
+    parent.types?.try &.each_value do |type|
       case type
       when Const, LibType
         next
@@ -180,7 +217,7 @@ class Crystal::Doc::Generator
   def collect_constants(parent)
     types = [] of Constant
 
-    parent.type.types.each_value do |type|
+    parent.type.types?.try &.each_value do |type|
       if type.is_a?(Const) && must_include? type
         types << Constant.new(self, parent, type)
       end
@@ -203,7 +240,7 @@ class Crystal::Doc::Generator
 
     dot_index = line =~ /\.($|\s)/
     if dot_index
-      line = line[0 .. dot_index]
+      line = line[0..dot_index]
     end
 
     doc context, line
@@ -217,14 +254,16 @@ class Crystal::Doc::Generator
   end
 
   def doc(context, string)
-    String.build do |io|
+    string = isolate_flag_lines string
+    markdown = String.build do |io|
       Markdown.parse string, MarkdownDocRenderer.new(context, io)
     end
+    generate_flags markdown
   end
 
   def fetch_doc_lines(doc)
     doc.gsub /\n+/ do |match|
-      if match.length == 1
+      if match.size == 1
         " "
       else
         "\n"
@@ -232,25 +271,53 @@ class Crystal::Doc::Generator
     end
   end
 
-  def compute_repository
-    remotes = `git remote -v`
-    return unless  $?.success?
+  # Replaces flag keywords with html equivalent
+  #
+  # Assumes that flag keywords are at the beginning of respective `p` element
+  def generate_flags(string)
+    FLAGS.reduce(string) do |str, flag|
+      flag_regexp = /<p>\s*#{flag}:?/
+      element_sub = %(<p><span class="flag #{FLAG_COLORS[flag]}">#{flag}</span> )
+      str.gsub(flag_regexp, element_sub)
+    end
+  end
 
-    remotes.lines.each do |line|
-      if line =~ /github\.com(?:\:|\/)((?:\w|-|_)+)\/((?:\w|-|_|\.)+)/
-        user, repo = $1, $2.gsub(/\.git$/, "")
-        rev = `git rev-parse HEAD`.chomp
-
-        @repository = "https://github.com/#{user}/#{repo}/blob/#{rev}"
-        @repo_name = "github.com/#{user}/#{repo}"
-
-        if user == "manastech" && repo == "crystal"
-          @is_crystal_repository = true
+  # Adds extra line break to flag keyword lines
+  #
+  # Guarantees that line is within its own paragraph element when parsed
+  def isolate_flag_lines(string)
+    flag_regexp = /^ ?(#{FLAGS.join('|')}):?/
+    String.build do |io|
+      string.each_line(chomp: false).join("", io) do |line, io|
+        if line =~ flag_regexp
+          io << '\n' << line
+        else
+          io << line
         end
-
-        break
       end
     end
+  end
+
+  def compute_repository
+    remotes = `git remote -v`
+    return unless $?.success?
+
+    git_matches = remotes.each_line.compact_map do |line|
+      GIT_REMOTE_PATTERNS.each_key.compact_map(&.match(line)).first?
+    end.to_a
+
+    @is_crystal_repo = git_matches.any? { |gr| gr.string =~ %r{github\.com[/:]crystal-lang/crystal(?:\.git)?\s} }
+
+    origin = git_matches.find(&.string.starts_with?("origin")) || git_matches.first?
+    return unless origin
+
+    user = origin["user"]
+    repo = origin["repo"]
+    rev = `git rev-parse HEAD`.chomp
+
+    info = GIT_REMOTE_PATTERNS[origin.regex]
+    @repository = info[:repository] % {user: user, repo: repo, rev: rev}
+    @repository_name = info[:repo_name] % {user: user, repo: repo}
   end
 
   def source_link(node)
@@ -285,10 +352,18 @@ class Crystal::Doc::Generator
     filename = location.filename
     return unless filename.is_a?(String)
     return unless filename.starts_with? @base_dir
-    filename[@base_dir.length .. -1]
+    filename[@base_dir.size..-1]
   end
 
-  record RelativeLocation, filename, url
+  record RelativeLocation, filename : String, line_number : Int32, url : String? do
+    def to_json(builder : JSON::Builder)
+      builder.object do
+        builder.field "filename", filename
+        builder.field "line_number", line_number
+        builder.field "url", url
+      end
+    end
+  end
   SRC_SEP = "src#{File::SEPARATOR}"
 
   def relative_locations(type)
@@ -303,15 +378,11 @@ class Crystal::Doc::Generator
 
       url = "#{repository}#{filename}" if repository
 
-      filename = filename[1 .. -1] if filename.starts_with? File::SEPARATOR
-      filename = filename[4 .. -1] if filename.starts_with? SRC_SEP
+      filename = filename[1..-1] if filename.starts_with? File::SEPARATOR
+      filename = filename[4..-1] if filename.starts_with? SRC_SEP
 
-      locations << RelativeLocation.new(filename, url)
+      locations << RelativeLocation.new(filename, location.line_number, url)
     end
     locations
-  end
-
-  def repository_name
-    @repo_name ? @repo_name : ""
   end
 end

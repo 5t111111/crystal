@@ -1,5 +1,5 @@
-struct LLVM::TargetMachine
-  def initialize(@unwrap)
+class LLVM::TargetMachine
+  def initialize(@unwrap : LibLLVM::TargetMachineRef)
   end
 
   def target
@@ -8,15 +8,19 @@ struct LLVM::TargetMachine
   end
 
   def data_layout
-    layout = LibLLVM.get_target_machine_data(self)
-    layout ? TargetData.new(layout) : raise "Missing layout for #{self}"
+    @layout ||= begin
+      layout = {% if LibLLVM::IS_38 %}
+                 LibLLVM.get_target_machine_data(self)
+               {% else %} # LLVM >= 3.9
+                 LibLLVM.create_target_data_layout(self)
+               {% end %}
+      layout ? TargetData.new(layout) : raise "Missing layout for #{self}"
+    end
   end
 
   def triple
     triple_c = LibLLVM.get_target_machine_triple(self)
-    triple = String.new(triple_c)
-    LibLLVM.dispose_message(triple_c)
-    triple
+    LLVM.string_and_dispose(triple_c)
   end
 
   def emit_obj_to_file(llvm_mod, filename)
@@ -30,7 +34,7 @@ struct LLVM::TargetMachine
   private def emit_to_file(llvm_mod, filename, type)
     status = LibLLVM.target_machine_emit_to_file(self, llvm_mod, filename, type, out error_msg)
     unless status == 0
-      raise String.new(error_msg)
+      raise LLVM.string_and_dispose(error_msg)
     end
     true
   end
@@ -38,10 +42,14 @@ struct LLVM::TargetMachine
   def abi
     triple = self.triple
     case triple
-    when /x86_64/
+    when /x86_64|amd64/
       ABI::X86_64.new(self)
-    when /i386|i686/
+    when /i386|i486|i586|i686/
       ABI::X86.new(self)
+    when /aarch64/
+      ABI::AArch64.new(self)
+    when /arm/
+      ABI::ARM.new(self)
     else
       raise "Unsupported ABI for target triple: #{triple}"
     end
@@ -49,5 +57,9 @@ struct LLVM::TargetMachine
 
   def to_unsafe
     @unwrap
+  end
+
+  def finalize
+    LibLLVM.dispose_target_machine(@unwrap)
   end
 end

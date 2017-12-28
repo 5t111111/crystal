@@ -1,114 +1,68 @@
-lib LibC
-  enum FCNTL
-    F_GETFD = 1
-    F_SETFD = 2
-    F_GETFL = 3
-    F_SETFL = 4
-  end
+require "c/stdio"
+require "c/errno"
+{% unless flag?(:win32) %}
+  require "c/unistd"
+{% end %}
 
-  FD_CLOEXEC = 1
-
-  ifdef linux
-    O_RDONLY   = 0o0000000
-    O_WRONLY   = 0o0000001
-    O_RDWR     = 0o0000002
-    O_APPEND   = 0o0002000
-    O_CREAT    = 0o0000100
-    O_TRUNC    = 0o0001000
-    O_NONBLOCK = 0o0004000
-    O_CLOEXEC  = 0o2000000
-  elsif darwin
-    O_RDONLY   = 0x0000
-    O_WRONLY   = 0x0001
-    O_RDWR     = 0x0002
-    O_APPEND   = 0x0008
-    O_CREAT    = 0x0200
-    O_TRUNC    = 0x0400
-    O_NONBLOCK = 0x0004
-    O_CLOEXEC  = 0x1000000
-  end
-
-  S_IRWXU    = 0o000700         # RWX mask for owner
-  S_IRUSR    = 0o000400         # R for owner
-  S_IWUSR    = 0o000200         # W for owner
-  S_IXUSR    = 0o000100         # X for owner
-  S_IRWXG    = 0o000070         # RWX mask for group
-  S_IRGRP    = 0o000040         # R for group
-  S_IWGRP    = 0o000020         # W for group
-  S_IXGRP    = 0o000010         # X for group
-  S_IRWXO    = 0o000007         # RWX mask for other
-  S_IROTH    = 0o000004         # R for other
-  S_IWOTH    = 0o000002         # W for other
-  S_IXOTH    = 0o000001         # X for other
-
-  EWOULDBLOCK = 140
-  EAGAIN      = 11
-
-  fun fcntl(fd : Int, cmd : FCNTL, ...) : Int
-  fun getchar : Int
-  fun putchar(c : Int) : Int
-  fun puts(str : Char*) : Int
-  fun printf(str : Char*, ...) : Int
-  fun execl(path : Char*, arg0 : Char*, ...) : Int
-  fun waitpid(pid : PidT, stat_loc : Int*, options : Int) : PidT
-  fun open(path : Char*, oflag : Int, ...) : Int
-  fun dup2(fd : Int, fd2 : Int) : Int
-  fun read(fd : Int, buffer : Char*, nbyte : SizeT) : SSizeT
-  fun write(fd : Int, buffer : Char*, nbyte : SizeT) : SSizeT
-  fun pipe(filedes : Int[2]*) : Int
-  fun select(nfds : Int, readfds : Void*, writefds : Void*, errorfds : Void*, timeout : TimeVal*) : Int
-  fun lseek(fd : Int, offset  : OffT, whence : Int) : OffT
-  fun close(fd : Int) : Int
-  fun isatty(fd : Int) : Int
-end
-
-# The IO module is the basis for all input and output in Crystal.
+# The `IO` class is the basis for all input and output in Crystal.
 #
-# This module is included by types like `File`, `Socket` and `StringIO` and
+# This class is inherited by types like `File`, `Socket` and `IO::Memory` and
 # provide many useful methods for reading to and writing from an IO, like `print`, `puts`,
 # `gets` and `printf`.
 #
-# The only requirement for a type including the IO module is to define
+# The only requirement for a type including the `IO` module is to define
 # these two methods:
 #
-# * `read(slice : Slice(UInt8))`: read at most *slice.length* bytes into *slice* and return the number of bytes read
-# * `write(slice : Slice(UInt8))`: write at most *slice.length* bytes from *slice* and return the number of bytes written
+# * `read(slice : Bytes)`: read at most *slice.size* bytes into *slice* and return the number of bytes read
+# * `write(slice : Bytes)`: write the whole *slice* into the IO
 #
-# For example, this is a simple IO on top of a `Slice(UInt8)`:
+# For example, this is a simple `IO` on top of a `Bytes`:
 #
 # ```
-# class SimpleSliceIO
-#   include IO
-#
-#   def initialize(@slice : Slice(UInt8))
+# class SimpleSliceIO < IO
+#   def initialize(@slice : Bytes)
 #   end
 #
-#   def read(slice : Slice(UInt8))
-#     slice.length.times { |i| slice[i] = @slice[i] }
-#     @slice += slice.length
-#     count
+#   def read(slice : Bytes)
+#     slice.size.times { |i| slice[i] = @slice[i] }
+#     @slice += slice.size
+#     slice.size
 #   end
 #
-#   def write(slice : Slice(UInt8))
-#     slice.length.times { |i| @slice[i] = slice[i] }
-#     @slice += slice.length
-#     count
+#   def write(slice : Bytes)
+#     slice.size.times { |i| @slice[i] = slice[i] }
+#     @slice += slice.size
+#     nil
 #   end
 # end
 #
 # slice = Slice.new(9) { |i| ('a'.ord + i).to_u8 }
-# String.new(slice) #=> "abcdefghi"
+# String.new(slice) # => "abcdefghi"
 #
 # io = SimpleSliceIO.new(slice)
-# io.read(3) #=> "abc"
+# io.gets(3) # => "abc"
 # io.print "xyz"
-# String.new(slice) #=> "abcxyzghi"
+# String.new(slice) # => "abcxyzghi"
 # ```
-module IO
+#
+# ### Encoding
+#
+# An `IO` can be set an encoding with the `#set_encoding` method. When this is
+# set, all string operations (`gets`, `gets_to_end`, `read_char`, `<<`, `print`, `puts`
+# `printf`) will write in the given encoding, and read from the given encoding.
+# Byte operations (`read`, `write`, `read_byte`, `write_byte`) never do
+# encoding/decoding operations.
+#
+# If an encoding is not set, the default one is UTF-8.
+#
+# Mixing string and byte operations might not give correct results and should be
+# avoided, as string operations might need to read extra bytes in order to get characters
+# in the given encoding.
+abstract class IO
   # Argument to a `seek` operation.
   enum Seek
     # Seeks to an absolute location
-    Set    = 0
+    Set = 0
 
     # Seeks to a location relative to the current location
     # in the stream
@@ -116,196 +70,155 @@ module IO
 
     # Seeks to a location relative to the end of the stream
     # (you probably want a negative value for the amount)
-    End    = 2
+    End = 2
   end
 
-  # Raised when an IO operation times out.
+  @encoding : EncodingOptions?
+  @encoder : Encoder?
+  @decoder : Decoder?
+
+  # Raised when an `IO` operation times out.
   #
   # ```
   # STDIN.read_timeout = 1
-  # STDIN.gets #=> IO::Timeout (after 1 second)
+  # STDIN.gets # raises IO::Timeout (after 1 second)
   # ```
   class Timeout < Exception
   end
 
-  def self.select(read_ios, write_ios = nil, error_ios = nil)
-    select(read_ios, write_ios, error_ios, nil).not_nil!
+  # Reads at most *slice.size* bytes from this `IO` into *slice*.
+  # Returns the number of bytes read, which is 0 if and only if there is no
+  # more data to read (so checking for 0 is the way to detect end of file).
+  #
+  # ```
+  # io = IO::Memory.new "hello"
+  # slice = Bytes.new(4)
+  # io.read(slice) # => 4
+  # slice          # => Bytes[104, 101, 108, 108]
+  # io.read(slice) # => 1
+  # slice          # => Bytes[111, 101, 108, 108]
+  # io.read(slice) # => 0
+  # ```
+  abstract def read(slice : Bytes)
+
+  # Writes the contents of *slice* into this `IO`.
+  #
+  # ```
+  # io = IO::Memory.new
+  # slice = Bytes.new(4) { |i| ('a'.ord + i).to_u8 }
+  # io.write(slice)
+  # io.to_s # => "abcd"
+  # ```
+  abstract def write(slice : Bytes) : Nil
+
+  # Closes this `IO`.
+  #
+  # `IO` defines this is a no-op method, but including types may override.
+  def close
   end
 
-  # Returns an array of all given IOs that are
-  # * ready to read if they appeared in read_ios
-  # * ready to write if they appeared in write_ios
-  # * have an error condition if they appeared in error_ios
+  # Returns `true` if this `IO` is closed.
   #
-  # If the optional timeout_sec is given, nil is returned if no
-  # IO was ready after the specified amount of seconds passed. Fractions
-  # are supported.
-  #
-  # If timeout_sec is nil, this method blocks until an IO is ready.
-  def self.select(read_ios, write_ios, error_ios, timeout_sec : LibC::TimeT|Int|Float?)
-    nfds = 0
-    read_ios.try &.each do |io|
-      nfds = io.fd if io.fd > nfds
-    end
-    write_ios.try &.each do |io|
-      nfds = io.fd if io.fd > nfds
-    end
-    error_ios.try &.each do |io|
-      nfds = io.fd if io.fd > nfds
-    end
-    nfds += 1
-
-    read_fdset  = FdSet.from_ios(read_ios)
-    write_fdset = FdSet.from_ios(write_ios)
-    error_fdset = FdSet.from_ios(error_ios)
-
-    if timeout_sec
-      sec = LibC::TimeT.cast(timeout_sec)
-
-      if timeout_sec.is_a? Float
-        usec = (timeout_sec-sec) * 10e6
-      else
-        usec = 0
-      end
-
-      timeout = LibC::TimeVal.new
-      timeout.tv_sec = sec
-      timeout.tv_usec = LibC::UsecT.cast(usec)
-      timeout_ptr = pointerof(timeout)
-    else
-      timeout_ptr = Pointer(LibC::TimeVal).null
-    end
-
-    ret = LibC.select(nfds, read_fdset, write_fdset, error_fdset, timeout_ptr)
-    case ret
-    when 0 # Timeout
-      nil
-    when -1
-      raise Errno.new("Error waiting with select()")
-    else
-      ios = [] of IO
-      read_ios.try &.each do |io|
-        ios << io if read_fdset.is_set(io)
-      end
-      write_ios.try &.each do |io|
-        ios << io if write_fdset.is_set(io)
-      end
-      error_ios.try &.each do |io|
-        ios << io if error_fdset.is_set(io)
-      end
-      ios
-    end
+  # `IO` defines returns `false`, but including types may override.
+  def closed?
+    false
   end
 
-  # Reads at most *slice.length* bytes from this IO into *slice*. Returns the number of bytes read.
-  #
-  # ```
-  # io = StringIO.new "hello"
-  # slice = Slice(UInt8).new(4)
-  # io.read(slice) #=> 4
-  # slice #=> [104, 101, 108, 108]
-  # io.read(slice) #=> 1
-  # slice #=> [111, 101, 108, 108]
-  # ```
-  abstract def read(slice : Slice(UInt8))
-
-  # Writes at most *slice.length* bytes from *slice* into this IO. Returns the number of bytes written.
-  #
-  # ```
-  # io = StringIO.new
-  # slice = Slice(UInt8).new(4) { |i| ('a'.ord + i).to_u8 }
-  # io.write(slice) #=> 4
-  # io.to_s #=> "abcd"
-  abstract def write(slice : Slice(UInt8))
+  protected def check_open
+    raise IO::Error.new "Closed stream" if closed?
+  end
 
   # Flushes buffered data, if any.
   #
-  # IO defines this is a no-op method, but including types may override.
+  # `IO` defines this is a no-op method, but including types may override.
   def flush
   end
 
-  # Creates a pair of pipe endpoints (connected to each other) and returns them as a
-  # two-element tuple.
-  #
-  # ```
-  # reader, writer = IO.pipe
-  # writer.puts "hello"
-  # writer.puts "world"
-  # reader.gets #=> "hello"
-  # reader.gets #=> "world"
-  # ```
-  def self.pipe(read_blocking = false, write_blocking = false)
-    if LibC.pipe(out pipe_fds) != 0
-      raise Errno.new("Could not create pipe")
+  {% unless flag?(:win32) %}
+    # Creates a pair of pipe endpoints (connected to each other)
+    # and returns them as a two-element `Tuple`.
+    #
+    # ```
+    # reader, writer = IO.pipe
+    # writer.puts "hello"
+    # writer.puts "world"
+    # reader.gets # => "hello"
+    # reader.gets # => "world"
+    # ```
+    def self.pipe(read_blocking = false, write_blocking = false)
+      pipe_fds = uninitialized StaticArray(LibC::Int, 2)
+      if LibC.pipe(pipe_fds) != 0
+        raise Errno.new("Could not create pipe")
+      end
+
+      r = IO::FileDescriptor.new(pipe_fds[0], read_blocking)
+      w = IO::FileDescriptor.new(pipe_fds[1], write_blocking)
+      r.close_on_exec = true
+      w.close_on_exec = true
+      w.sync = true
+
+      {r, w}
     end
 
-    r = FileDescriptorIO.new(pipe_fds[0], read_blocking)
-    w = FileDescriptorIO.new(pipe_fds[1], write_blocking)
-    r.close_on_exec = true
-    w.close_on_exec = true
-    w.sync = true
-
-    {r, w}
-  end
-
-  # Creates a pair of pipe endpoints (connected to each other) and passes them
-  # to the given block. Both endpoints are closed after the block.
-  #
-  # ```
-  # IO.pipe do |reader, writer|
-  #   writer.puts "hello"
-  #   writer.puts "world"
-  #   reader.gets #=> "hello"
-  #   reader.gets #=> "world"
-  # end
-  # ```
-  def self.pipe(read_blocking = false, write_blocking = false)
-    r, w = IO.pipe(read_blocking, write_blocking)
-    begin
-      yield r, w
-    ensure
-      w.flush
-      r.close
-      w.close
+    # Creates a pair of pipe endpoints (connected to each other) and passes them
+    # to the given block. Both endpoints are closed after the block.
+    #
+    # ```
+    # IO.pipe do |reader, writer|
+    #   writer.puts "hello"
+    #   writer.puts "world"
+    #   reader.gets # => "hello"
+    #   reader.gets # => "world"
+    # end
+    # ```
+    def self.pipe(read_blocking = false, write_blocking = false)
+      r, w = IO.pipe(read_blocking, write_blocking)
+      begin
+        yield r, w
+      ensure
+        w.flush
+        r.close
+        w.close
+      end
     end
-  end
+  {% end %}
 
-  # Writes the given object into this IO.
+  # Writes the given object into this `IO`.
   # This ends up calling `to_s(io)` on the object.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new
   # io << 1
   # io << '-'
   # io << "Crystal"
-  # io.to_s #=> "1-Crystal"
+  # io.to_s # => "1-Crystal"
   # ```
   def <<(obj) : self
     obj.to_s self
     self
   end
 
-  # Same as `<<`
+  # Same as `<<`.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new
   # io.print 1
   # io.print '-'
   # io.print "Crystal"
-  # io.to_s #=> "1-Crystal"
+  # io.to_s # => "1-Crystal"
   # ```
   def print(obj) : Nil
     self << obj
     nil
   end
 
-  # Writes the given objects into this IO by invoking `to_s(io)`
+  # Writes the given objects into this `IO` by invoking `to_s(io)`
   # on each of the objects.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new
   # io.print 1, '-', "Crystal"
-  # io.to_s #=> "1-Crystal"
+  # io.to_s # => "1-Crystal"
   # ```
   def print(*objects : _) : Nil
     objects.each do |obj|
@@ -314,14 +227,14 @@ module IO
     nil
   end
 
-  # Writes the given string to this IO followed by a newline character
+  # Writes the given string to this `IO` followed by a newline character
   # unless the string already ends with one.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new
   # io.puts "hello\n"
   # io.puts "world"
-  # io.to_s #=> "hello\nworld\n"
+  # io.to_s # => "hello\nworld\n"
   # ```
   def puts(string : String) : Nil
     self << string
@@ -329,13 +242,13 @@ module IO
     nil
   end
 
-  # Writes the given object to this IO followed by a newline character.
+  # Writes the given object to this `IO` followed by a newline character.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new
   # io.puts 1
   # io.puts "Crystal"
-  # io.to_s #=> "1\nCrystal\n"
+  # io.to_s # => "1\nCrystal\n"
   # ```
   def puts(obj) : Nil
     self << obj
@@ -345,21 +258,21 @@ module IO
   # Writes a newline character.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new
   # io.puts
-  # io.to_s #=> "\n"
+  # io.to_s # => "\n"
   # ```
   def puts : Nil
-    write_byte '\n'.ord.to_u8
+    print '\n'
     nil
   end
 
   # Writes the given objects, each followed by a newline character.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new
   # io.puts 1, '-', "Crystal"
-  # io.to_s #=> "1\n-\nCrystal\n"
+  # io.to_s # => "1\n-\nCrystal\n"
   # ```
   def puts(*objects : _) : Nil
     objects.each do |obj|
@@ -374,20 +287,20 @@ module IO
 
   # ditto
   def printf(format_string, args : Array | Tuple) : Nil
-    String::Formatter.new(format_string, args, self).format
+    String::Formatter(typeof(args)).new(format_string, args, self).format
     nil
   end
 
-  # Reads a single byte from this IO. Returns `nil` if there is no more
+  # Reads a single byte from this `IO`. Returns `nil` if there is no more
   # data to read.
   #
   # ```
-  # io = StringIO.new "a"
-  # io.read_byte #=> 97
-  # io.read_byte #=> nil
+  # io = IO::Memory.new "a"
+  # io.read_byte # => 97
+  # io.read_byte # => nil
   # ```
-  def read_byte # : UInt8? # (TODO: uncomment after 0.7.6)
-    byte :: UInt8
+  def read_byte : UInt8?
+    byte = uninitialized UInt8
     if read(Slice.new(pointerof(byte), 1)) == 1
       byte
     else
@@ -395,13 +308,13 @@ module IO
     end
   end
 
-  # Reads a single `Char` from this IO. Returns `nil` if there is no
+  # Reads a single `Char` from this `IO`. Returns `nil` if there is no
   # more data to read.
   #
   # ```
-  # io = StringIO.new "あ"
-  # io.read_char #=> 'あ'
-  # io.read_char #=> nil
+  # io = IO::Memory.new "あ"
+  # io.read_char # => 'あ'
+  # io.read_char # => nil
   # ```
   def read_char : Char?
     info = read_char_with_bytesize
@@ -409,156 +322,449 @@ module IO
   end
 
   private def read_char_with_bytesize
-    first = read_byte
+    # For UTF-8 encoding, try to see if we can peek 4 bytes.
+    # If so, this will be faster than reading byte per byte.
+    if !decoder && (peek = self.peek)
+      if peek.empty?
+        return nil
+      else
+        return read_char_with_bytesize_peek(peek)
+      end
+    else
+      read_char_with_bytesize_slow
+    end
+  end
+
+  private def read_char_with_bytesize_peek(peek)
+    first = peek[0].to_u32
+    skip(1)
+    if first < 0x80
+      return first.unsafe_chr, 1
+    end
+
+    second = peek_or_read_masked(peek, 1)
+    if first < 0xe0
+      return ((first & 0x1f) << 6 | second).unsafe_chr, 2
+    end
+
+    third = peek_or_read_masked(peek, 2)
+    if first < 0xf0
+      return ((first & 0x0f) << 12 | (second << 6) | third).unsafe_chr, 3
+    end
+
+    fourth = peek_or_read_masked(peek, 3)
+    if first < 0xf8
+      return ((first & 0x07) << 18 | (second << 12) | (third << 6) | fourth).unsafe_chr, 4
+    end
+
+    raise InvalidByteSequenceError.new("Unexpected byte 0x#{first.to_s(16)} in UTF-8 byte sequence")
+  end
+
+  private def read_char_with_bytesize_slow
+    first = read_utf8_byte
     return nil unless first
 
     first = first.to_u32
-    return first.chr, 1 if first < 0x80
+    return first.unsafe_chr, 1 if first < 0x80
 
     second = read_utf8_masked_byte
-    return ((first & 0x1f) << 6 | second).chr, 2 if first < 0xe0
+    return ((first & 0x1f) << 6 | second).unsafe_chr, 2 if first < 0xe0
 
     third = read_utf8_masked_byte
-    return ((first & 0x0f) << 12 | (second << 6) | third).chr, 3 if first < 0xf0
+    return ((first & 0x0f) << 12 | (second << 6) | third).unsafe_chr, 3 if first < 0xf0
 
     fourth = read_utf8_masked_byte
-    return ((first & 0x07) << 18 | (second << 12) | (third << 6) | fourth).chr, 4 if first < 0xf8
+    return ((first & 0x07) << 18 | (second << 12) | (third << 6) | fourth).unsafe_chr, 4 if first < 0xf8
 
-    raise InvalidByteSequenceError.new
+    raise InvalidByteSequenceError.new("Unexpected byte 0x#{first.to_s(16)} in UTF-8 byte sequence")
   end
 
   private def read_utf8_masked_byte
-    byte = read_byte || raise "Incomplete UTF-8 byte sequence"
+    byte = read_utf8_byte || raise InvalidByteSequenceError.new("Incomplete UTF-8 byte sequence")
     (byte & 0x3f).to_u32
   end
 
-  # Tries to read exactly `slice.length` bytes from this IO into `slice`.
-  # Raises `EOFError` if there aren't `slice.length` bytes of data.
+  private def peek_or_read_masked(peek, index)
+    if byte = peek[index]?
+      skip(1)
+      (byte & 0x3f).to_u32
+    else
+      read_utf8_masked_byte
+    end
+  end
+
+  # Reads a single decoded UTF-8 byte from this `IO`.
+  # Returns `nil` if there is no more data to read.
+  #
+  # If no encoding is set, this is the same as `#read_byte`.
   #
   # ```
-  # io = StringIO.new "123451234"
-  # slice = Slice(UInt8).new(5)
-  # io.read_fully(slice)
-  # slice #=> [49, 50, 51, 52, 53]
-  # io.read_fully #=> EOFError
+  # bytes = "你".encode("GB2312") # => Bytes[196, 227]
+  #
+  # io = IO::Memory.new(bytes)
+  # io.set_encoding("GB2312")
+  # io.read_utf8_byte # => 228
+  # io.read_utf8_byte # => 189
+  # io.read_utf8_byte # => 160
+  # io.read_utf8_byte # => nil
+  #
+  # "你".bytes # => [228, 189, 160]
   # ```
-  def read_fully(slice : Slice(UInt8))
-    count = slice.length
-    while slice.length > 0
+  def read_utf8_byte
+    if decoder = decoder()
+      decoder.read_byte(self)
+    else
+      read_byte
+    end
+  end
+
+  # Reads UTF-8 decoded bytes into the given *slice*.
+  # Returns the number of UTF-8 bytes read.
+  #
+  # If no encoding is set, this is the same as `#read(slice)`.
+  #
+  # ```
+  # bytes = "你".encode("GB2312") # => Bytes[196, 227]
+  #
+  # io = IO::Memory.new(bytes)
+  # io.set_encoding("GB2312")
+  #
+  # buffer = uninitialized UInt8[1024]
+  # bytes_read = io.read_utf8(buffer.to_slice) # => 3
+  # buffer.to_slice[0, bytes_read]             # => Bytes[228, 189, 160]
+  #
+  # "你".bytes # => [228, 189, 160]
+  # ```
+  def read_utf8(slice : Bytes)
+    if decoder = decoder()
+      decoder.read_utf8(self, slice)
+    else
+      read(slice)
+    end
+  end
+
+  # Reads an UTF-8 encoded string of exactly *bytesize* bytes.
+  # Raises `EOFError` if there are not enough bytes to build
+  # the string.
+  #
+  # ```
+  # io = IO::Memory.new("hello world")
+  # io.read_string(5) # => "hello"
+  # io.read_string(1) # => " "
+  # io.read_string(6) # raises IO::EOFError
+  # ```
+  def read_string(bytesize : Int) : String
+    String.new(bytesize) do |ptr|
+      if decoder = decoder()
+        read = decoder.read_utf8(self, Slice.new(ptr, bytesize))
+        if read != bytesize
+          raise IO::EOFError.new
+        end
+      else
+        read_fully(Slice.new(ptr, bytesize))
+      end
+      {bytesize, 0}
+    end
+  end
+
+  # Peeks into this IO, if possible.
+  #
+  # It returns:
+  # - `nil` if this IO isn't peekable
+  # - an empty slice if it is, but EOF was reached
+  # - a non-empty slice if some data can be peeked
+  #
+  # The returned bytes are only valid data until a next call
+  # to any method that reads from this IO is invoked.
+  #
+  # By default this method returns `nil`, but IO implementations
+  # that provide buffering or wrap other IOs should override
+  # this method.
+  def peek : Bytes?
+    nil
+  end
+
+  # Writes a slice of UTF-8 encoded bytes to this `IO`, using the current encoding.
+  def write_utf8(slice : Bytes)
+    if encoder = encoder()
+      encoder.write(self, slice)
+    else
+      write(slice)
+    end
+    nil
+  end
+
+  private def encoder
+    if encoding = @encoding
+      @encoder ||= Encoder.new(encoding)
+    else
+      nil
+    end
+  end
+
+  private def decoder
+    if encoding = @encoding
+      @decoder ||= Decoder.new(encoding)
+    else
+      nil
+    end
+  end
+
+  # Tries to read exactly `slice.size` bytes from this `IO` into *slice*.
+  # Raises `EOFError` if there aren't `slice.size` bytes of data.
+  #
+  # ```
+  # io = IO::Memory.new "123451234"
+  # slice = Bytes.new(5)
+  # io.read_fully(slice) # => 5
+  # slice                # => Bytes[49, 50, 51, 52, 53]
+  # io.read_fully(slice) # raises IO::EOFError
+  # ```
+  def read_fully(slice : Bytes)
+    read_fully?(slice) || raise(EOFError.new)
+  end
+
+  # Tries to read exactly `slice.size` bytes from this `IO` into *slice*.
+  # Returns `nil` if there aren't `slice.size` bytes of data, otherwise
+  # returns the number of bytes read.
+  #
+  # ```
+  # io = IO::Memory.new "123451234"
+  # slice = Bytes.new(5)
+  # io.read_fully?(slice) # => 5
+  # slice                 # => Bytes[49, 50, 51, 52, 53]
+  # io.read_fully?(slice) # => nil
+  # ```
+  def read_fully?(slice : Bytes)
+    count = slice.size
+    while slice.size > 0
       read_bytes = read slice
-      raise EOFError.new if read_bytes == 0
+      return nil if read_bytes == 0
       slice += read_bytes
     end
     count
   end
 
-  # Reads the rest of this IO data as a `String`.
+  # Reads the rest of this `IO` data as a `String`.
   #
   # ```
-  # io = StringIO.new "hello world"
-  # io.read #=> "hello world"
-  # io.read #=> ""
+  # io = IO::Memory.new "hello world"
+  # io.gets_to_end # => "hello world"
   # ```
-  def read : String
-    buffer :: UInt8[2048]
+  def gets_to_end : String
     String.build do |str|
-      while (read_bytes = read(buffer.to_slice)) > 0
-        str.write buffer.to_slice[0, read_bytes]
+      if decoder = decoder()
+        while true
+          decoder.read(self)
+          break if decoder.out_slice.empty?
+
+          decoder.write(str)
+        end
+      else
+        buffer = uninitialized UInt8[4096]
+        while (read_bytes = read(buffer.to_slice)) > 0
+          str.write buffer.to_slice[0, read_bytes]
+        end
       end
     end
   end
 
-  # Reads at most `count` bytes from this IO as a `String`.
-  # If less than `count` bytes are read it's because the end was reached.
+  # Reads a line from this `IO`. A line is terminated by the `\n` character.
+  # Returns `nil` if called at the end of this `IO`.
+  #
+  # By default the newline is removed from the returned string,
+  # unless *chomp* is `false`.
   #
   # ```
-  # io = StringIO.new "abcde"
-  # io.read(3) #=> "abc"
-  # io.read(3) #=> "ab"
-  # io.read(3) #=> ""
+  # io = IO::Memory.new "hello\nworld\nfoo\n"
+  # io.gets               # => "hello"
+  # io.gets(chomp: false) # => "world\n"
+  # io.gets               # => "foo"
+  # io.gets               # => nil
   # ```
-  def read(count : Int) : String
-    raise ArgumentError.new "negative count" if count < 0
+  def gets(chomp = true) : String?
+    gets '\n', chomp: chomp
+  end
 
-    buffer :: UInt8[2048]
-    String.build(count) do |str|
-      while count > 0
-        read_length = read buffer.to_slice[0, Math.min(count, buffer.length)]
-        break if read_length == 0
+  # Reads a line of at most *limit* bytes from this `IO`.
+  # A line is terminated by the `\n` character.
+  # Returns `nil` if called at the end of this `IO`.
+  #
+  # ```
+  # io = IO::Memory.new "hello\nworld"
+  # io.gets(3) # => "hel"
+  # io.gets(3) # => "lo\n"
+  # io.gets(3) # => "wor"
+  # io.gets(3) # => "ld"
+  # io.gets(3) # => nil
+  # ```
+  def gets(limit : Int, chomp = false) : String?
+    gets '\n', limit: limit, chomp: chomp
+  end
 
-        str.write buffer.to_slice[0, read_length]
-        count -= read_length
+  # Reads until *delimiter* is found, or the end of the `IO` is reached.
+  # Returns `nil` if called at the end of this `IO`.
+  #
+  # ```
+  # io = IO::Memory.new "hello\nworld"
+  # io.gets('o') # => "hello"
+  # io.gets('r') # => "\nwor"
+  # io.gets('z') # => "ld"
+  # io.gets('w') # => nil
+  # ```
+  def gets(delimiter : Char, chomp = false) : String?
+    gets delimiter, Int32::MAX, chomp: chomp
+  end
+
+  # Reads until *delimiter* is found, *limit* bytes are read, or the end of the `IO` is reached.
+  # Returns `nil` if called at the end of this `IO`.
+  #
+  # ```
+  # io = IO::Memory.new "hello\nworld"
+  # io.gets('o', 3)  # => "hel"
+  # io.gets('r', 10) # => "lo\nwor"
+  # io.gets('z', 10) # => "ld"
+  # io.gets('w', 10) # => nil
+  # ```
+  def gets(delimiter : Char, limit : Int, chomp = false) : String?
+    raise ArgumentError.new "Negative limit" if limit < 0
+
+    ascii = delimiter.ascii?
+    decoder = decoder()
+
+    # # If the char's representation is a single byte and we have an encoding,
+    # search the delimiter in the buffer
+    if ascii && decoder
+      return decoder.gets(self, delimiter.ord.to_u8, limit: limit, chomp: chomp)
+    end
+
+    # If there's no encoding, the delimiter is ASCII and we can peek,
+    # use a faster algorithm
+    if ascii && !decoder && (peek = self.peek)
+      if peek.empty?
+        nil
+      else
+        gets_peek(delimiter, limit, chomp, peek)
       end
+    else
+      gets_slow(delimiter, limit, chomp)
     end
   end
 
-  # Reads a line from this IO. A line is terminated by the `\n` character.
-  # Returns `nil` if called at the end of this IO.
-  #
-  # ```
-  # io = StringIO.new "hello\nworld"
-  # io.gets #=> "hello\n"
-  # io.gets #=> "world"
-  # io.gets #=> nil
-  # ```
-  def gets : String?
-    gets '\n'
+  private def gets_peek(delimiter, limit, chomp, peek)
+    limit = Int32::MAX if limit < 0
+
+    delimiter_byte = delimiter.ord.to_u8
+
+    # We first check, if the delimiter is already in the peek buffer.
+    # In that case it's much faster to create a String from a slice
+    # of the buffer instead of appending to a IO::Memory,
+    # which happens in the other case.
+    index = peek.index(delimiter_byte)
+    if index
+      # If we find it past the limit, limit the result
+      if index >= limit
+        index = limit
+      else
+        index += 1
+      end
+
+      advance = index
+
+      if chomp && index > 0 && peek[index - 1] === delimiter_byte
+        index -= 1
+
+        if delimiter == '\n' && index > 0 && peek[index - 1] === '\r'
+          index -= 1
+        end
+      end
+
+      string = String.new(peek[0, index])
+      skip(advance)
+      return string
+    end
+
+    # We didn't find the delimiter, so we append to a String::Builder
+    # until we find it or we reach the limit, appending what we have
+    # in the peek buffer and peeking again.
+    String.build do |buffer|
+      while peek
+        available = Math.min(peek.size, limit)
+        buffer.write peek[0, available]
+        skip(available)
+        peek += available
+        limit -= available
+
+        if limit == 0
+          break
+        end
+
+        if peek.size == 0
+          peek = self.peek
+        end
+
+        if !peek || peek.empty?
+          if buffer.bytesize == 0
+            return nil
+          else
+            break
+          end
+        end
+
+        index = peek.index(delimiter_byte)
+        if index
+          if index >= limit
+            index = limit
+          else
+            index += 1
+          end
+          buffer.write peek[0, index]
+          skip(index)
+          break
+        end
+      end
+      buffer.chomp!(delimiter_byte) if chomp
+    end
   end
 
-  # Reads a line of at most `limit` bytes from this IO. A line is terminated by the `\n` character.
-  # Returns `nil` if called at the end of this IO.
-  #
-  # ```
-  # io = StringIO.new "hello\nworld"
-  # io.gets(3) #=> "hel"
-  # io.gets(3) #=> "lo\n"
-  # io.gets(3) #=> "wor"
-  # io.gets(3) #=> "ld"
-  # io.gets(3) #=> nil
-  # ```
-  def gets(limit : Int) : String?
-    gets '\n', limit
-  end
-
-  # Reads until *delimiter* is found, or the end of the IO is reached.
-  # Returns `nil` if called at the end of this IO.
-  #
-  # ```
-  # io = StringIO.new "hello\nworld"
-  # io.gets('o') #=> "hello"
-  # io.gets('r') #=> "\nwor"
-  # io.gets('z') #=> "ld"
-  # io.gets('w') #=> nil
-  # ```
-  def gets(delimiter : Char) : String?
-    gets delimiter, Int32::MAX
-  end
-
-  # Reads until *delimiter* is found, `limit` bytes are read, or the end of the IO is reached.
-  # Returns `nil` if called at the end of this IO.
-  #
-  # ```
-  # io = StringIO.new "hello\nworld"
-  # io.gets('o', 3) #=> "hel"
-  # io.gets('r', 10) #=> "lo\nwor"
-  # io.gets('z', 10) #=> "ld"
-  # io.gets('w', 10) #=> nil
-  # ```
-  def gets(delimiter : Char, limit : Int)
-    raise ArgumentError.new "negative limit" if limit < 0
+  private def gets_slow(delimiter : Char, limit, chomp)
+    chomp_rn = delimiter == '\n' && chomp
 
     buffer = String::Builder.new
     total = 0
     while true
-      info = read_char_with_bytesize
+      info = read_char_with_bytesize_slow
       unless info
         return buffer.empty? ? nil : buffer.to_s
       end
 
       char, char_bytesize = info
 
-      buffer << char
-      break if char == delimiter
+      # Consider the case of \r\n when the delimiter is \n and chomp = true
+      if chomp_rn && char == '\r'
+        info2 = read_char_with_bytesize_slow
+        unless info2
+          buffer << char
+          break
+        end
+
+        char2, char_bytesize2 = info2
+        if char2 == '\n'
+          break
+        end
+
+        buffer << '\r'
+        total += char_bytesize
+        break if total >= limit
+
+        buffer << char2
+        total += char_bytesize2
+      elsif char == delimiter
+        buffer << char unless chomp
+        break
+      else
+        buffer << char
+      end
 
       total += char_bytesize
       break if total >= limit
@@ -566,29 +772,29 @@ module IO
     buffer.to_s
   end
 
-  # Reads until *delimiter* is found or the end of the IO is reached.
-  # Returns `nil` if called at the end of this IO.
+  # Reads until *delimiter* is found or the end of the `IO` is reached.
+  # Returns `nil` if called at the end of this `IO`.
   #
   # ```
-  # io = StringIO.new "hello\nworld"
-  # io.gets("wo") #=> "hello\nwo"
-  # io.gets("wo") #=> "rld"
-  # io.gets("wo") #=> nil
+  # io = IO::Memory.new "hello\nworld"
+  # io.gets("wo") # => "hello\nwo"
+  # io.gets("wo") # => "rld"
+  # io.gets("wo") # => nil
   # ```
-  def gets(delimiter : String)
+  def gets(delimiter : String, chomp = false) : String?
     # Empty string: read all
     if delimiter.empty?
-      return read
+      return gets_to_end
     end
 
     # One byte: use gets(Char)
     if delimiter.bytesize == 1
-      return gets(delimiter.unsafe_byte_at(0).chr)
+      return gets(delimiter.unsafe_byte_at(0).unsafe_chr, chomp: chomp)
     end
 
     # One char: use gets(Char)
-    if delimiter.length == 1
-      return gets(delimiter[0])
+    if delimiter.size == 1
+      return gets(delimiter[0], chomp: chomp)
     end
 
     # The 'hard' case: we read until we match the last byte,
@@ -598,60 +804,120 @@ module IO
 
     buffer = String::Builder.new
     while true
-      unless byte = read_byte
+      unless byte = read_utf8_byte
         return buffer.empty? ? nil : buffer.to_s
       end
       buffer.write_byte(byte)
       total_bytes += 1
 
-      break if (byte == last_byte) &&
-               (buffer.bytesize >= delimiter.bytesize) &&
-               (buffer.buffer + total_bytes - delimiter.bytesize).memcmp(delimiter.to_unsafe, delimiter.bytesize) == 0
+      if (byte == last_byte) &&
+         (buffer.bytesize >= delimiter.bytesize) &&
+         (buffer.buffer + total_bytes - delimiter.bytesize).memcmp(delimiter.to_unsafe, delimiter.bytesize) == 0
+        buffer.back(delimiter.bytesize) if chomp
+        break
+      end
     end
     buffer.to_s
   end
 
-  # Same as `gets`, but raises `EOFError` if called at the end of this IO.
-  def read_line(*args)
-    gets(*args) || raise EOFError.new
+  # Same as `gets`, but raises `EOFError` if called at the end of this `IO`.
+  def read_line(*args, **options) : String
+    gets(*args, **options) || raise EOFError.new
   end
 
-  # Writes the bytes in the given array to this IO.
-  def write(array : Array(UInt8))
-    # TODO: maybe we should remove this method? Array is heavy for IO
-    write Slice.new(array.buffer, array.length)
-  end
-
-  # Writes a single byte into this IO.
+  # Reads and discards exactly *bytes_count* bytes.
+  # Raises `IO::EOFError` if there aren't at least *bytes_count* bytes.
   #
   # ```
-  # io = StringIO.new
+  # io = IO::Memory.new "hello world"
+  # io.skip(6)
+  # io.gets    # => "world"
+  # io.skip(1) # raises IO::EOFError
+  # ```
+  def skip(bytes_count : Int) : Nil
+    buffer = uninitialized UInt8[4096]
+    while bytes_count > 0
+      read_count = read(buffer.to_slice[0, Math.min(bytes_count, 4096)])
+      raise IO::EOFError.new if read_count == 0
+
+      bytes_count -= read_count
+    end
+  end
+
+  # Reads and discards bytes from `self` until there
+  # are no more bytes.
+  def skip_to_end : Nil
+    buffer = uninitialized UInt8[4096]
+    while read(buffer.to_slice) > 0
+    end
+  end
+
+  # Writes a single byte into this `IO`.
+  #
+  # ```
+  # io = IO::Memory.new
   # io.write_byte 97_u8
-  # io.to_s #=> "a"
+  # io.to_s # => "a"
   # ```
   def write_byte(byte : UInt8)
     x = byte
     write Slice.new(pointerof(x), 1)
   end
 
-  # Returns `true` if this IO is associated with a terminal device (tty), `false` otherwise.
+  # Writes the given object to this `IO` using the specified *format*.
+  #
+  # This ends up invoking `object.to_io(self, format)`, so any object defining a
+  # `to_io(io : IO, format : IO::ByteFormat = IO::ByteFormat::SystemEndian)`
+  # method can be written in this way.
+  #
+  # See `Int#to_io` and `Float#to_io`.
+  #
+  # ```
+  # io = IO::Memory.new
+  # io.write_bytes(0x01020304, IO::ByteFormat::LittleEndian)
+  # io.rewind
+  # io.gets(4) # => "\u{4}\u{3}\u{2}\u{1}"
+  # ```
+  def write_bytes(object, format : IO::ByteFormat = IO::ByteFormat::SystemEndian)
+    object.to_io(self, format)
+  end
+
+  # Reads an instance of the given *type* from this `IO` using the specified *format*.
+  #
+  # This ends up invoking `type.from_io(self, format)`, so any type defining a
+  # `from_io(io : IO, format : IO::ByteFormat = IO::ByteFormat::SystemEndian)`
+  # method can be read in this way.
+  #
+  # See `Int.from_io` and `Float.from_io`.
+  #
+  # ```
+  # io = IO::Memory.new
+  # io.puts "\u{4}\u{3}\u{2}\u{1}"
+  # io.rewind
+  # io.read_bytes(Int32, IO::ByteFormat::LittleEndian) # => 0x01020304
+  # ```
+  def read_bytes(type, format : IO::ByteFormat = IO::ByteFormat::SystemEndian)
+    type.from_io(self, format)
+  end
+
+  # Returns `true` if this `IO` is associated with a terminal device (tty), `false` otherwise.
   #
   # IO returns `false`, but including types may override.
   #
   # ```
-  # STDIN.tty?        #=> true
-  # StringIO.new.tty? #=> false
+  # STDIN.tty?          # => true
+  # IO::Memory.new.tty? # => false
   # ```
-  def tty?
+  def tty? : Bool
     false
   end
 
-  # Invokes the given block with each *line* in this IO, where a line
+  # Invokes the given block with each *line* in this `IO`, where a line
   # is defined by the arguments passed to this method, which can be the same
   # ones as in the `gets` methods.
   #
   # ```
-  # io = StringIO.new("hello\nworld")
+  # io = IO::Memory.new("hello\nworld")
   # io.each_line do |line|
   #   puts line.chomp.reverse
   # end
@@ -663,30 +929,30 @@ module IO
   # olleh
   # dlrow
   # ```
-  def each_line(*args)
-    while line = gets(*args)
+  def each_line(*args, **options) : Nil
+    while line = gets(*args, **options)
       yield line
     end
   end
 
-  # Returns an `Iterator` for the *lines* in this IO, where a line
+  # Returns an `Iterator` for the *lines* in this `IO`, where a line
   # is defined by the arguments passed to this method, which can be the same
   # ones as in the `gets` methods.
   #
   # ```
-  # io = StringIO.new("hello\nworld")
+  # io = IO::Memory.new("hello\nworld")
   # iter = io.each_line
-  # iter.next #=> "hello\n"
-  # iter.next #=> "world"
+  # iter.next # => "hello"
+  # iter.next # => "world"
   # ```
-  def each_line(*args)
-    LineIterator.new(self, args)
+  def each_line(*args, **options)
+    LineIterator.new(self, args, options)
   end
 
-  # Inovkes the given block with each `Char` in this IO.
+  # Invokes the given block with each `Char` in this `IO`.
   #
   # ```
-  # io = StringIO.new("あめ")
+  # io = IO::Memory.new("あめ")
   # io.each_char do |char|
   #   puts char
   # end
@@ -698,28 +964,28 @@ module IO
   # あ
   # め
   # ```
-  def each_char
+  def each_char : Nil
     while char = read_char
       yield char
     end
   end
 
-  # Returns an `Iterator` for the chars in this IO.
+  # Returns an `Iterator` for the chars in this `IO`.
   #
   # ```
-  # io = StringIO.new("あめ")
+  # io = IO::Memory.new("あめ")
   # iter = io.each_char
-  # iter.next #=> 'あ'
-  # iter.next #=> 'め'
+  # iter.next # => 'あ'
+  # iter.next # => 'め'
   # ```
   def each_char
     CharIterator.new(self)
   end
 
-  # Inovkes the given block with each byte (`UInt8`) in this IO.
+  # Invokes the given block with each byte (`UInt8`) in this `IO`.
   #
   # ```
-  # io = StringIO.new("aあ")
+  # io = IO::Memory.new("aあ")
   # io.each_byte do |byte|
   #   puts byte
   # end
@@ -733,38 +999,139 @@ module IO
   # 129
   # 130
   # ```
-  def each_byte
+  def each_byte : Nil
     while byte = read_byte
       yield byte
     end
   end
 
-  # Returns an `Iterator` for the bytes in this IO.
+  # Returns an `Iterator` for the bytes in this `IO`.
   #
   # ```
-  # io = StringIO.new("aあ")
+  # io = IO::Memory.new("aあ")
   # iter = io.each_byte
-  # iter.next #=> 97
-  # iter.next #=> 227
-  # iter.next #=> 129
-  # iter.next #=> 130
+  # iter.next # => 97
+  # iter.next # => 227
+  # iter.next # => 129
+  # iter.next # => 130
   # ```
   def each_byte
     ByteIterator.new(self)
   end
 
+  # Rewinds this `IO`. By default this method raises, but including types
+  # may implement it.
+  def rewind
+    raise IO::Error.new("Can't rewind")
+  end
+
+  # Sets the encoding of this `IO`.
+  #
+  # The *invalid* argument can be:
+  # * `nil`: an exception is raised on invalid byte sequences
+  # * `:skip`: invalid byte sequences are ignored
+  #
+  # String operations (`gets`, `gets_to_end`, `read_char`, `<<`, `print`, `puts`
+  # `printf`) will use this encoding.
+  def set_encoding(encoding : String, invalid : Symbol? = nil)
+    if (encoding == "UTF-8") && (invalid != :skip)
+      @encoding = nil
+    else
+      @encoding = EncodingOptions.new(encoding, invalid)
+    end
+    @encoder.try &.close
+    @decoder.try &.close
+    @encoder = nil
+    @decoder = nil
+    nil
+  end
+
+  # Returns this `IO`'s encoding. The default is `UTF-8`.
+  def encoding : String
+    @encoding.try(&.name) || "UTF-8"
+  end
+
+  # Seeks to a given *offset* (in bytes) according to the *whence* argument.
+  #
+  # The `IO` class raises on this method, but some subclasses, notable
+  # `IO::FileDescriptor` and `IO::Memory` implement it.
+  #
+  # Returns `self`.
+  #
+  # ```
+  # File.write("testfile", "abc")
+  #
+  # file = File.new("testfile")
+  # file.gets(3) # => "abc"
+  # file.seek(1, IO::Seek::Set)
+  # file.gets(2) # => "bc"
+  # file.seek(-1, IO::Seek::Current)
+  # file.gets(1) # => "c"
+  # ```
+  def seek(offset, whence : Seek = Seek::Set)
+    raise Error.new "Unable to seek"
+  end
+
+  # Returns the current position (in bytes) in this `IO`.
+  #
+  # The `IO` class raises on this method, but some subclasses, notable
+  # `IO::FileDescriptor` and `IO::Memory` implement it.
+  #
+  # ```
+  # File.write("testfile", "hello")
+  #
+  # file = File.new("testfile")
+  # file.pos     # => 0
+  # file.gets(2) # => "he"
+  # file.pos     # => 2
+  # ```
+  def pos
+    raise Error.new "Unable to pos"
+  end
+
+  # Sets the current position (in bytes) in this `IO`.
+  #
+  # The `IO` class raises on this method, but some subclasses, notable
+  # `IO::FileDescriptor` and `IO::Memory` implement it.
+  #
+  # ```
+  # File.write("testfile", "hello")
+  #
+  # file = File.new("testfile")
+  # file.pos = 3
+  # file.gets_to_end # => "lo"
+  # ```
+  def pos=(value)
+    raise Error.new "Unable to pos="
+  end
+
+  # Same as `pos`.
+  def tell
+    pos
+  end
+
+  # Yields an `IO` to read a section inside this IO.
+  #
+  # The `IO` class raises on this method, but some subclasses, notable
+  # `File` and `IO::Memory` implement it.
+  #
+  # Mutliple sections can be read concurrently.
+  def read_at(offset, bytesize, &block)
+    raise Error.new "Unable to read_at"
+  end
+
   # Copy all contents from *src* to *dst*.
   #
   # ```
-  # io = StringIO.new "hello"
-  # io2 = StringIO.new
+  # io = IO::Memory.new "hello"
+  # io2 = IO::Memory.new
   #
   # IO.copy io, io2
   #
-  # io2.to_s #=> "hello"
+  # io2.to_s # => "hello"
   # ```
   def self.copy(src, dst)
-    buffer :: UInt8[1024]
+    buffer = uninitialized UInt8[4096]
     count = 0
     while (len = src.read(buffer.to_slice).to_i32) > 0
       dst.write buffer.to_slice[0, len]
@@ -773,15 +1140,36 @@ module IO
     len < 0 ? len : count
   end
 
-  # :nodoc:
-  struct LineIterator(I, A)
+  # Copy at most *limit* bytes from *src* to *dst*.
+  #
+  # ```
+  # io = IO::Memory.new "hello"
+  # io2 = IO::Memory.new
+  #
+  # IO.copy io, io2, 3
+  #
+  # io2.to_s # => "hel"
+  # ```
+  def self.copy(src, dst, limit : Int)
+    raise ArgumentError.new("Negative limit") if limit < 0
+
+    buffer = uninitialized UInt8[4096]
+    remaining = limit
+    while (len = src.read(buffer.to_slice[0, Math.min(buffer.size, Math.max(remaining, 0))])) > 0
+      dst.write buffer.to_slice[0, len]
+      remaining -= len
+    end
+    limit - remaining
+  end
+
+  private struct LineIterator(I, A, N)
     include Iterator(String)
 
-    def initialize(@io : I, @args : A)
+    def initialize(@io : I, @args : A, @nargs : N)
     end
 
     def next
-      @io.gets(*@args) || stop
+      @io.gets(*@args, **@nargs) || stop
     end
 
     def rewind
@@ -790,8 +1178,7 @@ module IO
     end
   end
 
-  # :nodoc:
-  struct CharIterator(I)
+  private struct CharIterator(I)
     include Iterator(Char)
 
     def initialize(@io : I)
@@ -807,8 +1194,7 @@ module IO
     end
   end
 
-  # :nodoc:
-  struct ByteIterator(I)
+  private struct ByteIterator(I)
     include Iterator(UInt8)
 
     def initialize(@io : I)
@@ -826,4 +1212,3 @@ module IO
 end
 
 require "./io/*"
-

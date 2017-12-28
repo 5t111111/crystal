@@ -1,3 +1,7 @@
+require "c/stdio"
+require "c/string"
+require "./float/printer"
+
 # Float is the base type of all floating point numbers.
 #
 # There are two floating point types, `Float32` and `Float64`,
@@ -10,27 +14,33 @@
 # followed by numbers or underscores, followed by an optional exponent suffix,
 # followed by an optional type suffix. If no suffix is present, the literal's type is `Float64`.
 #
-# ```text
-# 1.0      # Float64
-# 1.0_f32  # Float32
-# 1_f32    # Float32
+# ```
+# 1.0     # Float64
+# 1.0_f32 # Float32
+# 1_f32   # Float32
 #
-# 1e10     # Float64
-# 1.5e10   # Float64
-# 1.5e-7   # Float64
+# 1e10   # Float64
+# 1.5e10 # Float64
+# 1.5e-7 # Float64
 #
-# +1.3     # Float64
-# -0.5     # Float64
+# +1.3 # Float64
+# -0.5 # Float64
 # ```
 #
 # The underscore `_` before the suffix is optional.
 #
 # Underscores can be used to make some numbers more readable:
 #
-# ```text
+# ```
 # 1_000_000.111_111 # better than 1000000.111111
 # ```
 struct Float
+  alias Primitive = Float32 | Float64
+
+  def -
+    self.class.zero - self
+  end
+
   def %(other)
     modulo(other)
   end
@@ -57,7 +67,7 @@ struct Float
 
   def modulo(other)
     if other == 0.0
-      raise DivisionByZero.new
+      raise DivisionByZeroError.new
     else
       self - other * self.fdiv(other).floor
     end
@@ -65,26 +75,44 @@ struct Float
 
   def remainder(other)
     if other == 0.0
-      raise DivisionByZero.new
+      raise DivisionByZeroError.new
     else
       mod = self % other
-      return 0.0 if mod == 0.0
+      return self.class.zero if mod == 0.0
       return mod if self > 0 && other > 0
       return mod if self < 0 && other < 0
 
       mod - other
     end
   end
+
+  # See `Object#hash(hasher)`
+  def hash(hasher)
+    hasher.float(self)
+  end
+
+  # Writes this float to the given *io* in the given *format*.
+  # See also: `IO#write_bytes`.
+  def to_io(io : IO, format : IO::ByteFormat)
+    format.encode(self, io)
+  end
+
+  # Reads a float from the given *io* in the given *format*.
+  # See also: `IO#read_bytes`.
+  def self.from_io(io : IO, format : IO::ByteFormat) : self
+    format.decode(self, io)
+  end
 end
 
 struct Float32
-  NAN = 0_f32 / 0_f32
-  INFINITY = 1_f32 / 0_f32
-  MIN = -INFINITY
-  MAX =  INFINITY
+  NAN      = (0_f32 / 0_f32).as Float32
+  INFINITY = (1_f32 / 0_f32).as Float32
+  MIN      = (-INFINITY).as Float32
+  MAX      = INFINITY.as Float32
 
-  def -
-    0.0_f32 - self
+  # Returns a `Float32` by invoking `to_f32` on *value*.
+  def self.new(value)
+    value.to_f32
   end
 
   def ceil
@@ -116,27 +144,34 @@ struct Float32
   end
 
   def to_s
-    to_f64.to_s
+    String.build(22) do |buffer|
+      Printer.print(self, buffer)
+    end
   end
 
   def to_s(io : IO)
-    to_f64.to_s(io)
+    Printer.print(self, io)
   end
 
-  def hash
-    n = self
-    (pointerof(n) as Int32*).value
+  def inspect(io)
+    to_s(io)
+    io << "_f32"
+  end
+
+  def clone
+    self
   end
 end
 
 struct Float64
-  NAN = 0_f64 / 0_f64
-  INFINITY = 1_f64 / 0_f64
-  MIN = -INFINITY
-  MAX =  INFINITY
+  NAN      = (0_f64 / 0_f64).as Float64
+  INFINITY = (1_f64 / 0_f64).as Float64
+  MIN      = (-INFINITY).as Float64
+  MAX      = INFINITY.as Float64
 
-  def -
-    0.0 - self
+  # Returns a `Float64` by invoking `to_f64` on *value*.
+  def Float64.new(value)
+    value.to_f64
   end
 
   def ceil
@@ -168,21 +203,16 @@ struct Float64
   end
 
   def to_s
-    String.new(22) do |buffer|
-      LibC.snprintf(buffer, LibC::SizeT.cast(22), "%g", self)
-      len = LibC.strlen(buffer)
-      {len, len}
+    String.build(22) do |buffer|
+      Printer.print(self, buffer)
     end
   end
 
   def to_s(io : IO)
-    chars = StaticArray(UInt8, 22).new(0_u8)
-    LibC.snprintf(chars, LibC::SizeT.cast(22), "%g", self)
-    io.write chars.to_slice[0, LibC.strlen(chars.buffer).to_i]
+    Printer.print(self, io)
   end
 
-  def hash
-    n = self
-    (pointerof(n) as Int64*).value
+  def clone
+    self
   end
 end

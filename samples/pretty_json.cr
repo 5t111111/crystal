@@ -9,7 +9,7 @@ require "json"
 require "colorize"
 
 class PrettyPrinter
-  def initialize(@input, @output)
+  def initialize(@input : IO, @output : IO)
     @pull = JSON::PullParser.new @input
     @indent = 0
   end
@@ -53,7 +53,7 @@ class PrettyPrinter
     print "[\n"
     @indent += 1
     i = 0
-    @pull.read_array do |obj|
+    @pull.read_array do
       if i > 0
         print ','
         print '\n' if @indent > 0
@@ -103,4 +103,3 @@ end
 printer = PrettyPrinter.new(STDIN, STDOUT)
 printer.print
 STDOUT.puts
-

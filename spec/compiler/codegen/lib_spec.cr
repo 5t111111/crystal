@@ -126,14 +126,14 @@ describe "Code gen: lib" do
     run(%(
       require "prelude"
 
-      lib M
+      lib Moo
         struct Type
           func : (Type*) -> Int32
         end
       end
 
-      p = Pointer(M::Type).malloc(1)
-      p.value.func = -> (t: M::Type*) { 10 }
+      p = Pointer(Moo::Type).malloc(1)
+      p.value.func = -> (t: Moo::Type*) { 10 }
       p.value.func.call(p)
       )).to_i.should eq(10)
   end
@@ -142,14 +142,14 @@ describe "Code gen: lib" do
     run(%(
       require "prelude"
 
-      lib M
+      lib Moo
         union Type
           func : (Type*) -> Int32
         end
       end
 
-      p = Pointer(M::Type).malloc(1)
-      p.value.func = -> (t: M::Type*) { 10 }
+      p = Pointer(Moo::Type).malloc(1)
+      p.value.func = -> (t: Moo::Type*) { 10 }
       p.value.func.call(p)
       )).to_i.should eq(10)
   end
@@ -170,6 +170,61 @@ describe "Code gen: lib" do
       end
 
       Lib.foo out _
+      ))
+  end
+
+  it "passes int as another float type in literal" do
+    codegen(%(
+      lib LibFoo
+        fun foo(x : Int32)
+      end
+
+      LibFoo.foo 1234.5
+      ))
+  end
+
+  it "passes nil to varargs (#1570)" do
+    codegen(%(
+      lib LibFoo
+        fun foo(...)
+      end
+
+      LibFoo.foo(nil)
+      ))
+  end
+
+  it "casts C fun to Crystal proc when accessing instance var (#2515)" do
+    codegen(%(
+      require "prelude"
+
+      lib LibFoo
+        struct Some
+          x : ->
+        end
+      end
+
+      LibFoo::Some.new.to_s
+      ))
+  end
+
+  it "doesn't crash when casting -1 to UInt32 (#3594)" do
+    codegen(%(
+      lib LibFoo
+        fun foo(x : UInt32) : Nil
+      end
+
+      LibFoo.foo(-1)
+      ))
+  end
+
+  it "doesn't crash with nil and varargs (#4414)" do
+    codegen(%(
+      lib LibFoo
+        fun foo(Void*, ...)
+      end
+
+      x = nil
+      LibFoo.foo(x)
       ))
   end
 end

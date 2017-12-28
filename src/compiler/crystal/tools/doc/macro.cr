@@ -1,13 +1,14 @@
 require "html"
+require "uri"
 require "./item"
 
 class Crystal::Doc::Macro
   include Item
 
-  getter type
-  getter :macro
+  getter type : Type
+  getter macro : Crystal::Macro
 
-  def initialize(@generator, @type, @macro)
+  def initialize(@generator : Generator, @type : Type, @macro : Crystal::Macro)
   end
 
   def name
@@ -28,7 +29,7 @@ class Crystal::Doc::Macro
 
   def id
     String.build do |io|
-      io << to_s.gsub(' ', "")
+      io << to_s.gsub(/<.+?>/, "").gsub(' ', "")
       io << "-macro"
     end
   end
@@ -38,7 +39,7 @@ class Crystal::Doc::Macro
   end
 
   def anchor
-    "#" + CGI.escape(id)
+    "#" + URI.escape(id)
   end
 
   def prefix
@@ -65,12 +66,22 @@ class Crystal::Doc::Macro
   def args_to_s(io)
     return if @macro.args.empty?
 
+    printed = false
     io << '('
+
     @macro.args.each_with_index do |arg, i|
-      io << ", " if i > 0
+      io << ", " if printed
       io << '*' if @macro.splat_index == i
       io << arg
+      printed = true
     end
+
+    if double_splat = @macro.double_splat
+      io << ", " if printed
+      io << "**"
+      io << double_splat
+    end
+
     io << ')'
   end
 
@@ -80,5 +91,20 @@ class Crystal::Doc::Macro
 
   def must_be_included?
     @generator.must_include? @macro
+  end
+
+  def to_json(builder : JSON::Builder)
+    builder.object do
+      builder.field "id", id
+      builder.field "html_id", html_id
+      builder.field "name", name
+      builder.field "doc", doc
+      builder.field "summary", formatted_summary
+      builder.field "abstract", abstract?
+      builder.field "args", args
+      builder.field "args_string", args_to_s
+      builder.field "source_link", source_link
+      builder.field "def", self.macro
+    end
   end
 end

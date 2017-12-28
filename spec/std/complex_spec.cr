@@ -41,6 +41,11 @@ describe "Complex" do
     Complex.new(1.25, -8.2).to_s.should eq("1.25 - 8.2i")
   end
 
+  it "inspect" do
+    Complex.new(1.25, 8.2).inspect.should eq("(1.25 + 8.2i)")
+    Complex.new(1.25, -8.2).inspect.should eq("(1.25 - 8.2i)")
+  end
+
   it "abs" do
     Complex.new(5.1, 9.7).abs.should eq(10.959014554237985)
   end
@@ -74,9 +79,9 @@ describe "Complex" do
   end
 
   it "sqrt" do
-    Complex.new(1.32, 7.25).sqrt.should  be_close(Complex.new(2.0843687106374236, 1.739135682425128), 1e-15)
-    Complex.new(7.11, -0.9).sqrt.should  be_close(Complex.new(2.671772413453534, -0.1684275194002508), 1e-15)
-    Complex.new(-2.2, 6.22).sqrt.should  be_close(Complex.new(1.4828360708935342, 2.0973323087062226), 1e-15)
+    Complex.new(1.32, 7.25).sqrt.should be_close(Complex.new(2.0843687106374236, 1.739135682425128), 1e-15)
+    Complex.new(7.11, -0.9).sqrt.should be_close(Complex.new(2.671772413453534, -0.1684275194002508), 1e-15)
+    Complex.new(-2.2, 6.22).sqrt.should be_close(Complex.new(1.4828360708935342, 2.0973323087062226), 1e-15)
     Complex.new(-8.3, -1.11).sqrt.should be_close(Complex.new(0.1922159681400434, -2.8873771797962275), 1e-15)
   end
 
@@ -100,15 +105,15 @@ describe "Complex" do
 
   describe "+" do
     it "complex + complex" do
-      (Complex.new(2.2, 7)+Complex.new(10.1, 1.34)).should eq(Complex.new(12.3, 8.34))
+      (Complex.new(2.2, 7) + Complex.new(10.1, 1.34)).should eq(Complex.new(12.3, 8.34))
     end
 
     it "complex + number" do
-      (Complex.new(0.3, 5.5)+15).should eq(Complex.new(15.3, 5.5))
+      (Complex.new(0.3, 5.5) + 15).should eq(Complex.new(15.3, 5.5))
     end
 
     it "number + complex" do
-      (-1.7+Complex.new(7, 4.1)).should eq(Complex.new(5.3, 4.1))
+      (-1.7 + Complex.new(7, 4.1)).should eq(Complex.new(5.3, 4.1))
     end
   end
 
@@ -118,15 +123,15 @@ describe "Complex" do
     end
 
     it "complex - complex" do
-      (Complex.new(21.7, 2.0)-Complex.new(0.15, 3.4)).should eq(Complex.new(21.55, -1.4))
+      (Complex.new(21.7, 2.0) - Complex.new(0.15, 3.4)).should eq(Complex.new(21.55, -1.4))
     end
 
     it "complex - number" do
-      (Complex.new(8.1, 6.15)-15).should eq(Complex.new(-6.9, 6.15))
+      (Complex.new(8.1, 6.15) - 15).should eq(Complex.new(-6.9, 6.15))
     end
 
     it "number - complex" do
-      (-3.27-Complex.new(7, 5.1)).should eq(Complex.new(-10.27, -5.1))
+      (-3.27 - Complex.new(7, 5.1)).should eq(Complex.new(-10.27, -5.1))
     end
   end
 
@@ -155,7 +160,24 @@ describe "Complex" do
     end
 
     it "number / complex" do
-      (-5.7*(Complex.new(2.27, 8.92))).should eq(Complex.new(-12.939, -50.844))
+      (-5.7/(Complex.new(2.27, 8.92))).should eq(Complex.new(-0.1527278908111847, 0.6001466017778712))
     end
+  end
+
+  it "clones" do
+    c = Complex.new(4, 6.2)
+    c.clone.should eq(c)
+  end
+
+  it "hashes real without imag like real only" do
+    c = Complex.new(4, 0)
+    c.hash.should eq(4_f64.hash)
+  end
+
+  it "test zero?" do
+    Complex.new(0, 0).zero?.should eq true
+    Complex.new(0, 3.4).zero?.should eq false
+    Complex.new(1.2, 0).zero?.should eq false
+    Complex.new(1.2, 3.4).zero?.should eq false
   end
 end

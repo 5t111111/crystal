@@ -1,54 +1,62 @@
-# Reference is the base class of classes you define in your program.
+# `Reference` is the base class of classes you define in your program.
 # It is set as a class' superclass when you don't specify one:
 #
-#     class MyClass # < Reference
-#     end
+# ```
+# class MyClass # < Reference
+# end
+# ```
 #
 # A reference type is passed by reference: when you pass it to methods,
 # return it from methods or assign it to variables, a pointer is actually passed.
 #
-# Invoking `new` on a Reference allocates a new instance on the heap.
+# Invoking `new` on a `Reference` allocates a new instance on the heap.
 # The instance's memory is automatically freed (garbage-collected) when
 # the instance is no longer referred by any other entity in the program.
 class Reference
-  # Returns true if this reference is the same as other. Invokes `same?`
+  # Returns `true` if this reference is the same as *other*. Invokes `same?`.
   def ==(other : self)
     same?(other)
   end
 
-  # Returns false (other can only be a `Value` here).
+  # Returns `false` (other can only be a `Value` here).
   def ==(other)
     false
   end
 
-  # Returns true if this reference is the same as other. This is only
-  # true if this reference's `object_id` is the same as other's.
+  # Returns `true` if this reference is the same as *other*. This is only
+  # `true` if this reference's `object_id` is the same as *other*'s.
   def same?(other : Reference)
     object_id == other.object_id
   end
 
-  # Returns false: a reference is never nil.
+  # Returns `false`: a reference is never `nil`.
   def same?(other : Nil)
     false
   end
 
-  # Returns false: a reference is never nil.
-  def nil?
-    false
+  # Returns a shallow copy of this object.
+  #
+  # This allocates a new object and copies the contents of
+  # `self` into it.
+  def dup
+    {% if @type.abstract? %}
+      # This shouldn't happen, as the type is abstract,
+      # but we need to avoid the allocate invocation below
+      raise "Can't dup {{@type}}"
+    {% else %}
+      dup = self.class.allocate
+      dup.as(Void*).copy_from(self.as(Void*), instance_sizeof(self))
+      dup
+    {% end %}
   end
 
-  # Returns false: a reference is always truthy.
-  def !
-    false
+  # See `Object#hash(hasher)`
+  def hash(hasher)
+    hasher.reference(self)
   end
 
-  # Returns this reference's `object_id` as the hash value.
-  def hash
-    object_id
-  end
-
-  macro def inspect(io : IO) : Nil
-    io << "#<{{@type.name.id}}:0x"
+  def inspect(io : IO) : Nil
+    io << "#<" << {{@type.name.id.stringify}} << ":0x"
     object_id.to_s(16, io)
 
     executed = exec_recursive(:inspect) do
@@ -67,16 +75,51 @@ class Reference
     nil
   end
 
-  macro def to_s(io : IO) : Nil
-    io << "#<{{@type.name.id}}:0x"
+  def pretty_print(pp) : Nil
+    {% if @type.overrides?(Reference, "inspect") %}
+      pp.text inspect
+    {% else %}
+      prefix = "#<#{{{@type.name.id.stringify}}}:0x#{object_id.to_s(16)}"
+      executed = exec_recursive(:pretty_print) do
+        pp.surround(prefix, ">", left_break: nil, right_break: nil) do
+          {% for ivar, i in @type.instance_vars.map(&.name).sort %}
+            {% if i == 0 %}
+              pp.breakable
+            {% else %}
+              pp.comma
+            {% end %}
+            pp.group do
+              pp.text "@{{ivar.id}}="
+              pp.nest do
+                pp.breakable ""
+                @{{ivar.id}}.pretty_print(pp)
+              end
+            end
+          {% end %}
+        end
+      end
+      unless executed
+        pp.text "#{prefix} ...>"
+      end
+    {% end %}
+  end
+
+  def to_s(io : IO) : Nil
+    io << "#<" << self.class.name << ":0x"
     object_id.to_s(16, io)
     io << ">"
     nil
   end
 
+  # :nodoc:
+  module ExecRecursive
+    def self.hash
+      @@exec_recursive ||= {} of {UInt64, Symbol} => Bool
+    end
+  end
+
   private def exec_recursive(method)
-    # hash = (@[ThreadLocal] $_exec_recursive ||= {} of Tuple(UInt64, Symbol) => Bool)
-    hash = ($_exec_recursive ||= {} of Tuple(UInt64, Symbol) => Bool)
+    hash = ExecRecursive.hash
     key = {object_id, method}
     if hash[key]?
       false

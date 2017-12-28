@@ -1,9 +1,6 @@
 require "string_pool"
 
 abstract class JSON::Lexer
-  getter token
-  property skip
-
   def self.new(string : String)
     StringBased.new(string)
   end
@@ -12,11 +9,14 @@ abstract class JSON::Lexer
     IOBased.new(io)
   end
 
+  getter token : Token
+  property skip : Bool
+
   def initialize
     @token = Token.new
     @line_number = 1
     @column_number = 1
-    @buffer = StringIO.new
+    @buffer = IO::Memory.new
     @string_pool = StringPool.new
     @skip = false
     @expects_object_key = false
@@ -25,6 +25,9 @@ abstract class JSON::Lexer
   private abstract def consume_string
   private abstract def next_char_no_column_increment
   private abstract def current_char
+  private abstract def number_start
+  private abstract def append_number_char
+  private abstract def number_string
 
   def next_token
     skip_whitespace
@@ -125,18 +128,22 @@ abstract class JSON::Lexer
     while true
       case next_char
       when '\0'
-        raise "unterminated string"
+        raise "Unterminated string"
       when '\\'
         consume_string_escape_sequence
       when '"'
         next_char
         break
+      else
+        if 0 <= current_char.ord < 32
+          unexpected_char
+        end
       end
     end
   end
 
   private def consume_string_with_buffer
-    consume_string_with_buffer {}
+    consume_string_with_buffer { }
   end
 
   private def consume_string_with_buffer
@@ -145,14 +152,18 @@ abstract class JSON::Lexer
     while true
       case char = next_char
       when '\0'
-        raise "unterminated string"
+        raise "Unterminated string"
       when '\\'
         @buffer << consume_string_escape_sequence
       when '"'
         next_char
         break
       else
-        @buffer << char
+        if 0 <= current_char.ord < 32
+          unexpected_char
+        else
+          @buffer << char
+        end
       end
     end
     if @expects_object_key
@@ -188,7 +199,7 @@ abstract class JSON::Lexer
         hexnum1.chr
       end
     else
-      raise "uknown escape char: #{char}"
+      raise "Unknown escape char: #{char}"
     end
   end
 
@@ -196,90 +207,119 @@ abstract class JSON::Lexer
     hexnum = 0
     4.times do
       char = next_char
-      hexnum = (hexnum << 4) | char.to_i(16) { raise "unexpected char in hex number: #{char.inspect}" }
+      hexnum = (hexnum << 4) | (char.to_i?(16) || raise "Unexpected char in hex number: #{char.inspect}")
     end
     hexnum
   end
 
   private def consume_number
+    number_start
+
     integer = 0_i64
     negative = false
+    digits = 0
 
     if current_char == '-'
+      append_number_char
       negative = true
       next_char
     end
 
     case current_char
     when '0'
+      append_number_char
       next_char
       case current_char
       when '.'
-        consume_float(negative, integer)
+        consume_float(negative, integer, digits)
       when 'e', 'E'
-        consume_exponent(negative, integer.to_f64)
-      when '0' .. '9'
+        consume_exponent(negative, integer.to_f64, digits)
+      when '0'..'9'
         unexpected_char
       else
         @token.type = :INT
         @token.int_value = 0_i64
+        number_end
       end
-    when '1' .. '9'
+    when '1'..'9'
+      digits = 1
+      append_number_char
       integer = (current_char - '0').to_i64
       char = next_char
       while '0' <= char <= '9'
+        append_number_char
         integer *= 10
         integer += char - '0'
+        digits += 1
         char = next_char
       end
 
       case char
       when '.'
-        consume_float(negative, integer)
+        consume_float(negative, integer, digits)
       when 'e', 'E'
-        consume_exponent(negative, integer.to_f64)
+        consume_exponent(negative, integer.to_f64, digits)
       else
         @token.type = :INT
         @token.int_value = negative ? -integer : integer
+        number_end
       end
     else
       unexpected_char
     end
   end
 
-  private def consume_float(negative, integer)
+  private def consume_float(negative, integer, digits)
+    append_number_char
     divisor = 1_u64
     char = next_char
+
+    unless '0' <= char <= '9'
+      unexpected_char
+    end
+
     while '0' <= char <= '9'
+      append_number_char
       integer *= 10
       integer += char - '0'
       divisor *= 10
+      digits += 1
       char = next_char
     end
     float = integer.to_f64 / divisor
 
     if char == 'e' || char == 'E'
-      consume_exponent(negative, float)
+      consume_exponent(negative, float, digits)
     else
       @token.type = :FLOAT
-      @token.float_value = negative ? -float : float
+      # If there's a chance of overflow, we parse the raw string
+      if digits >= 18
+        @token.float_value = number_string.to_f64
+      else
+        @token.float_value = negative ? -float : float
+      end
+      number_end
     end
   end
 
-  private def consume_exponent(negative, float)
+  private def consume_exponent(negative, float, digits)
+    append_number_char
     exponent = 0
     negative_exponent = false
 
     char = next_char
     if char == '+'
+      append_number_char
       char = next_char
     elsif char == '-'
+      append_number_char
       char = next_char
       negative_exponent = true
     end
 
     if '0' <= char <= '9'
       while '0' <= char <= '9'
+        append_number_char
         exponent *= 10
         exponent += char - '0'
         char = next_char
@@ -292,7 +332,15 @@ abstract class JSON::Lexer
 
     exponent = -exponent if negative_exponent
     float *= (10_f64 ** exponent)
-    @token.float_value = negative ? -float : float
+
+    # If there's a chance of overflow, we parse the raw string
+    if digits >= 18
+      @token.float_value = number_string.to_f64
+    else
+      @token.float_value = negative ? -float : float
+    end
+
+    number_end
   end
 
   private def next_char
@@ -305,8 +353,12 @@ abstract class JSON::Lexer
     next_char
   end
 
+  private def number_end
+    @token.raw_value = number_string
+  end
+
   private def unexpected_char(char = current_char)
-    raise "unexpected char '#{char}'"
+    raise "Unexpected char '#{char}'"
   end
 
   private def raise(msg)

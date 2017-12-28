@@ -1,35 +1,39 @@
 module Crystal
   module LLVMBuilderHelper
     def int1(n)
-      LLVM.int LLVM::Int1, n
+      llvm_context.int1.const_int(n)
     end
 
     def int8(n)
-      LLVM.int LLVM::Int8, n
+      llvm_context.int8.const_int(n)
     end
 
     def int16(n)
-      LLVM.int LLVM::Int16, n
+      llvm_context.int16.const_int(n)
     end
 
     def int32(n)
-      LLVM.int LLVM::Int32, n
+      llvm_context.int32.const_int(n)
     end
 
     def int64(n)
-      LLVM.int LLVM::Int64, n
+      llvm_context.int64.const_int(n)
+    end
+
+    def int128(n)
+      llvm_context.int128.const_int(n)
     end
 
     def int(n)
       int32(n)
     end
 
-    def null
-      int(0)
+    def int(n, type)
+      llvm_type(type).const_int(n)
     end
 
     def llvm_nil
-      LLVMTyper::NIL_VALUE
+      llvm_typer.nil_value
     end
 
     def llvm_false
@@ -49,11 +53,11 @@ module Crystal
     end
 
     def null_pointer?(value)
-      equal? builder.ptr2int(value, LLVM::Int32), null
+      builder.icmp LLVM::IntPredicate::EQ, value, value.type.null
     end
 
     def not_null_pointer?(value)
-      not_equal? builder.ptr2int(value, LLVM::Int32), null
+      builder.icmp LLVM::IntPredicate::NE, value, value.type.null
     end
 
     def gep(ptr, index0 : Int32, name = "")
@@ -72,23 +76,9 @@ module Crystal
       builder.inbounds_gep ptr, index0, index1, name
     end
 
-    delegate ptr2int, builder
-    delegate int2ptr, builder
-    delegate and, builder
-    delegate or, builder
-    delegate not, builder
-    delegate call, builder
-    delegate bit_cast, builder
-    delegate trunc, builder
-    delegate load, builder
-    delegate store, builder
-    delegate br, builder
-    delegate insert_block, builder
-    delegate position_at_end, builder
-    delegate unreachable, builder
-    delegate cond, builder
-    delegate phi, builder
-    delegate extract_value, builder
+    delegate ptr2int, int2ptr, and, or, not, call, bit_cast,
+      trunc, load, store, br, insert_block, position_at_end, unreachable,
+      cond, phi, extract_value, to: builder
 
     def ret
       builder.ret
@@ -103,7 +93,7 @@ module Crystal
     end
 
     def cast_to_void_pointer(pointer)
-      bit_cast pointer, LLVM::VoidPointer
+      bit_cast pointer, llvm_context.void_pointer
     end
 
     def extend_int(from_type, to_type, value)
@@ -142,19 +132,15 @@ module Crystal
       bit_cast value, llvm_type(type).pointer
     end
 
-    delegate llvm_type, llvm_typer
-    delegate llvm_struct_type, llvm_typer
-    delegate llvm_arg_type, llvm_typer
-    delegate llvm_embedded_type, llvm_typer
-    delegate llvm_c_type, llvm_typer
-    delegate llvm_c_return_type, llvm_typer
+    delegate llvm_type, llvm_struct_type, llvm_arg_type, llvm_embedded_type,
+      llvm_c_type, llvm_c_return_type, llvm_return_type, to: llvm_typer
 
-    def llvm_fun_type(type)
-      llvm_typer.fun_type(type as FunInstanceType)
+    def llvm_proc_type(type)
+      llvm_typer.proc_type(type.as(ProcInstanceType))
     end
 
     def llvm_closure_type(type)
-      llvm_typer.closure_type(type as FunInstanceType)
+      llvm_typer.closure_type(type.as(ProcInstanceType))
     end
 
     def llvm_size(type)

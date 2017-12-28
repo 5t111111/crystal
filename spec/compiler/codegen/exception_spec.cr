@@ -45,20 +45,29 @@ describe "Code gen: exception" do
     run(%(
       require "prelude"
 
-      $x = 0
+      class Global
+        @@x = 0
+
+        def self.x=(@@x)
+        end
+
+        def self.x
+          @@x
+        end
+      end
 
       def foo
         raise "foo"
       rescue
-        $x += 1
+        Global.x += 1
         return
       ensure
-        $x += 1
+        Global.x += 1
       end
 
       foo
 
-      $x
+      Global.x
       )).to_i.should eq(2)
   end
 
@@ -82,8 +91,9 @@ describe "Code gen: exception" do
 
       y = 1
       x = 1
+
       x = begin
-            y == 1 ? raise "Oh no!" : nil
+            y == 1 ? raise("Oh no!") : nil
             y = 10
           rescue
             y = 4
@@ -126,7 +136,7 @@ describe "Code gen: exception" do
       require "prelude"
 
       y = begin
-            1 > 0 ? raise "Oh no!" : 0
+            1 > 0 ? raise("Oh no!") : 0
           rescue
             2.1
           end
@@ -606,7 +616,7 @@ describe "Code gen: exception" do
       )).to_i.should eq(2)
   end
 
-  it "handle exception raised by fun literal" do
+  it "handle exception raised by proc literal" do
     run(%(
       require "prelude"
 
@@ -763,14 +773,30 @@ describe "Code gen: exception" do
     run(%(
       require "prelude"
 
-      $a = 0
-      $b = 0
+      class Global
+        @@a = 0
+        @@b = 0
+
+        def self.a=(@@a)
+        end
+
+        def self.a
+          @@a
+        end
+
+        def self.b=(@@b)
+        end
+
+        def self.b
+          @@b
+        end
+      end
 
       def bar
         begin
           yield
         ensure
-          $a = 1
+          Global.a = 1
         end
       end
 
@@ -778,10 +804,10 @@ describe "Code gen: exception" do
         while true
           break
         end
-        $b = $a
+        Global.b = Global.a
       end
 
-      $b
+      Global.b
       )).to_i.should eq(0)
   end
 
@@ -843,24 +869,33 @@ describe "Code gen: exception" do
     run(%(
       require "prelude"
 
-      $a = 0
+      class Global
+        @@x = 0
+
+        def self.x=(@@x)
+        end
+
+        def self.x
+          @@x
+        end
+      end
 
       def foo
         begin
           begin
             raise "foo"
           rescue
-            $a += 1
+            Global.x += 1
             return
           end
         ensure
-          $a += 1
+          Global.x += 1
         end
       end
 
       foo
 
-      $a
+      Global.x
       )).to_i.should eq(2)
   end
 
@@ -889,13 +924,22 @@ describe "Code gen: exception" do
     run(%(
       require "prelude"
 
-      $a = 0
+      class Global
+        @@x = 0
+
+        def self.x=(@@x)
+        end
+
+        def self.x
+          @@x
+        end
+      end
 
       def foo
         begin
           yield
         ensure
-          $a += 1
+          Global.x += 1
         end
       end
 
@@ -905,13 +949,13 @@ describe "Code gen: exception" do
             return
           end
         ensure
-          $a += 1
+          Global.x += 1
         end
       end
 
       bar
 
-      $a
+      Global.x
       )).to_i.should eq(2)
   end
 
@@ -947,15 +991,31 @@ describe "Code gen: exception" do
     run(%(
       require "prelude"
 
-      $a = 0
-      $b = 0
+      class Global
+        @@a = 0
+        @@b = 0
+
+        def self.a=(@@a)
+        end
+
+        def self.a
+          @@a
+        end
+
+        def self.b=(@@b)
+        end
+
+        def self.b
+          @@b
+        end
+      end
 
       def foo
         begin
           yield
-          $b = $a
+          Global.b = Global.a
         ensure
-          $a += 1
+          Global.a += 1
         end
       end
 
@@ -964,14 +1024,14 @@ describe "Code gen: exception" do
           begin
             next
           ensure
-            $a += 1
+            Global.a += 1
           end
         end
       ensure
-        $a += 1
+        Global.a += 1
       end
 
-      $b
+      Global.b
       )).to_i.should eq(1)
   end
 
@@ -1007,19 +1067,210 @@ describe "Code gen: exception" do
     run(%(
       require "prelude"
 
-      $a = 0
+      class Global
+        @@x = 0
+
+        def self.x=(@@x)
+        end
+
+        def self.x
+          @@x
+        end
+      end
 
       def foo
         yield
       ensure
-        $a = 123
+        Global.x = 123
       end
 
       foo do
         break
       end
 
-      $a
+      Global.x
       )).to_i.should eq(123)
+  end
+
+  it "propagates raise status (#2074)" do
+    run(%(
+      require "prelude"
+
+      class Foo
+        @var : Var?
+
+        def method1
+          method2
+        end
+
+        def method2
+          if var = @var
+            var.method3
+          end
+        end
+
+        def var=(@var)
+        end
+      end
+
+      class Var
+        def method3
+          raise "OH NO"
+        end
+      end
+
+      # method1 isn't marked as raise because @var's type isn't known yet
+      Foo.new.method1
+
+      foo = Foo.new
+      # This causes method2 to recompute, but method1 doesn't get notified
+      # that it might now raise
+      foo.var = Var.new
+      a = 1
+      begin
+        foo.method1
+      rescue ex
+        a = 2
+      end
+      a
+      )).to_i.should eq(2)
+  end
+
+  it "doesn't crash on #1988" do
+    run(%(
+      require "prelude"
+
+      begin
+        x = 42
+      rescue
+      end
+
+      if x.is_a?(Int32)
+        x
+      else
+        21
+      end
+      )).to_i.should eq(42)
+  end
+
+  it "runs #2441" do
+    run(%(
+      require "prelude"
+
+      while true
+        begin
+          raise "foo"
+        rescue ex
+          break
+        end
+      end
+
+      ex.not_nil!.message.to_s
+      )).to_string.should eq("foo")
+  end
+
+  it "can rescue TypeCastError (#2607)" do
+    run(%(
+      require "prelude"
+
+      begin
+        (1 || "foo").as(String)
+        2
+      rescue e : TypeCastError
+        42
+      rescue e : Exception
+        0
+      end
+      )).to_i.should eq(42)
+  end
+
+  it "can use argument in rescue (#2844)" do
+    run(%(
+      require "prelude"
+
+      def foo(exe)
+        begin
+          raise exe
+        rescue exe
+          exe
+        end
+      end
+
+      ex = Exception.new("foo")
+      ex = foo(ex)
+      ex.message.not_nil!
+      )).to_string.should eq("foo")
+  end
+
+  it "can use argument in rescue, with a different type (1) (#2844)" do
+    run(%(
+      require "prelude"
+
+      def foo(exe)
+        begin
+          raise Exception.new("foo") if 1 == 1
+          exe
+        rescue exe
+          exe
+        end
+      end
+
+      ex = foo(1).as(Exception)
+      ex.message.not_nil!
+      )).to_string.should eq("foo")
+  end
+
+  it "can use argument in rescue, with a different type (2) (#2844)" do
+    run(%(
+      require "prelude"
+
+      def foo(exe)
+        begin
+          raise Exception.new("foo") if 1 == 2
+          exe
+        rescue exe
+          exe
+        end
+      end
+
+      foo(10).as(Int32)
+      )).to_i.should eq(10)
+  end
+
+  it "runs NoReturn ensure (#3082)" do
+    run(%(
+      require "prelude"
+
+      begin
+        print 1
+        raise "OH NO"
+        print 0
+      rescue
+        print 2
+      ensure
+        print 3
+        exit
+        print 4
+      end
+      print 5
+      )).to_i.should eq(123)
+  end
+
+  it "catches exception thrown by as inside method (#4030)" do
+    run(%(
+      require "prelude"
+
+      def foo
+        a = 1 || ""
+        a.as(String)
+      end
+
+      begin
+        foo
+        "bad"
+      rescue ex : TypeCastError
+        "good"
+      end
+      )).to_string.should eq("good")
   end
 end

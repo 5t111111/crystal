@@ -1,5 +1,13 @@
 require "spec"
 require "json"
+require "big"
+require "big/json"
+
+enum JSONSpecEnum
+  Zero
+  One
+  Two
+end
 
 describe "JSON serialization" do
   describe "from_json" do
@@ -40,15 +48,16 @@ describe "JSON serialization" do
     end
 
     it "does for Array(Int32) from IO" do
-      io = StringIO.new "[1, 2, 3]"
+      io = IO::Memory.new "[1, 2, 3]"
       Array(Int32).from_json(io).should eq([1, 2, 3])
     end
 
     it "does for Array(Int32) with block" do
       elements = [] of Int32
-      Array(Int32).from_json("[1, 2, 3]") do |element|
+      ret = Array(Int32).from_json("[1, 2, 3]") do |element|
         elements << element
       end
+      ret.should be_nil
       elements.should eq([1, 2, 3])
     end
 
@@ -56,6 +65,103 @@ describe "JSON serialization" do
       tuple = Tuple(Int32, String).from_json(%([1, "hello"]))
       tuple.should eq({1, "hello"})
       tuple.should be_a(Tuple(Int32, String))
+    end
+
+    it "does for named tuple" do
+      tuple = NamedTuple(x: Int32, y: String).from_json(%({"y": "hello", "x": 1}))
+      tuple.should eq({x: 1, y: "hello"})
+      tuple.should be_a(NamedTuple(x: Int32, y: String))
+    end
+
+    it "does for BigInt" do
+      big = BigInt.from_json("123456789123456789123456789123456789123456789")
+      big.should be_a(BigInt)
+      big.should eq(BigInt.new("123456789123456789123456789123456789123456789"))
+    end
+
+    it "does for BigFloat" do
+      big = BigFloat.from_json("1234.567891011121314")
+      big.should be_a(BigFloat)
+      big.should eq(BigFloat.new("1234.567891011121314"))
+    end
+
+    it "does for BigFloat from int" do
+      big = BigFloat.from_json("1234")
+      big.should be_a(BigFloat)
+      big.should eq(BigFloat.new("1234"))
+    end
+
+    it "does for Enum with number" do
+      JSONSpecEnum.from_json("1").should eq(JSONSpecEnum::One)
+
+      expect_raises(Exception, "Unknown enum JSONSpecEnum value: 3") do
+        JSONSpecEnum.from_json("3")
+      end
+    end
+
+    it "does for Enum with string" do
+      JSONSpecEnum.from_json(%("One")).should eq(JSONSpecEnum::One)
+
+      expect_raises(ArgumentError, "Unknown enum JSONSpecEnum value: Three") do
+        JSONSpecEnum.from_json(%("Three"))
+      end
+    end
+
+    it "deserializes with root" do
+      Int32.from_json(%({"foo": 1}), root: "foo").should eq(1)
+      Array(Int32).from_json(%({"foo": [1, 2]}), root: "foo").should eq([1, 2])
+    end
+
+    it "deserializes union" do
+      Array(Int32 | String).from_json(%([1, "hello"])).should eq([1, "hello"])
+    end
+
+    it "deserializes union with bool (fast path)" do
+      Union(Bool, Array(Int32)).from_json(%(true)).should be_true
+    end
+
+    {% for type in %w(Int8 Int16 Int32 Int64 UInt8 UInt16 UInt32 UInt64).map(&.id) %}
+        it "deserializes union with {{type}} (fast path)" do
+          Union({{type}}, Array(Int32)).from_json(%(#{ {{type}}::MAX })).should eq({{type}}::MAX)
+        end
+      {% end %}
+
+    it "deserializes union with Float32 (fast path)" do
+      Union(Float32, Array(Int32)).from_json(%(1)).should eq(1)
+      Union(Float32, Array(Int32)).from_json(%(1.23)).should eq(1.23_f32)
+    end
+
+    it "deserializes union with Float64 (fast path)" do
+      Union(Float64, Array(Int32)).from_json(%(1)).should eq(1)
+      Union(Float64, Array(Int32)).from_json(%(1.23)).should eq(1.23)
+    end
+
+    it "deserializes Time" do
+      Time.from_json(%("2016-11-16T09:55:48-0300")).to_utc.should eq(Time.utc(2016, 11, 16, 12, 55, 48))
+    end
+
+    describe "parse exceptions" do
+      it "has correct location when raises in NamedTuple#from_json" do
+        ex = expect_raises(JSON::ParseException) do
+          Array({foo: Int32, bar: String}).from_json <<-JSON
+            [
+              {"foo": 1}
+            ]
+            JSON
+        end
+        ex.location.should eq({2, 3})
+      end
+
+      it "has correct location when raises in Union#from_json" do
+        ex = expect_raises(JSON::ParseException) do
+          Array(Int32 | Bool).from_json <<-JSON
+            [
+              {"foo": "bar"}
+            ]
+            JSON
+        end
+        ex.location.should eq({2, 3})
+      end
     end
   end
 
@@ -74,6 +180,18 @@ describe "JSON serialization" do
 
     it "does for Float64" do
       1.5.to_json.should eq("1.5")
+    end
+
+    it "raises if Float is NaN" do
+      expect_raises JSON::Error, "NaN not allowed in JSON" do
+        (0.0/0.0).to_json
+      end
+    end
+
+    it "raises if Float is infinity" do
+      expect_raises JSON::Error, "Infinity not allowed in JSON" do
+        Float64::INFINITY.to_json
+      end
     end
 
     it "does for String" do
@@ -101,12 +219,16 @@ describe "JSON serialization" do
       [1, 2, 3].to_json.should eq("[1,2,3]")
     end
 
+    it "does for Set" do
+      Set(Int32).new([1, 1, 2]).to_json.should eq("[1,2]")
+    end
+
     it "does for Hash" do
       {"foo" => 1, "bar" => 2}.to_json.should eq(%({"foo":1,"bar":2}))
     end
 
     it "does for Hash with non-string keys" do
-      {foo: 1, bar: 2}.to_json.should eq(%({"foo":1,"bar":2}))
+      {:foo => 1, :bar => 2}.to_json.should eq(%({"foo":1,"bar":2}))
     end
 
     it "does for Hash with newlines" do
@@ -115,6 +237,24 @@ describe "JSON serialization" do
 
     it "does for Tuple" do
       {1, "hello"}.to_json.should eq(%([1,"hello"]))
+    end
+
+    it "does for NamedTuple" do
+      {x: 1, y: "hello"}.to_json.should eq(%({"x":1,"y":"hello"}))
+    end
+
+    it "does for Enum" do
+      JSONSpecEnum::One.to_json.should eq("1")
+    end
+
+    it "does for BigInt" do
+      big = BigInt.new("123456789123456789123456789123456789123456789")
+      big.to_json.should eq("123456789123456789123456789123456789123456789")
+    end
+
+    it "does for BigFloat" do
+      big = BigFloat.new("1234.567891011121314")
+      big.to_json.should eq("1234.567891011121314")
     end
   end
 
@@ -156,26 +296,23 @@ describe "JSON serialization" do
     end
 
     it "does for nested Hash" do
-      {"foo" => {"bar" => 1} }.to_pretty_json.should eq(%({\n  "foo": {\n    "bar": 1\n  }\n}))
+      {"foo" => {"bar" => 1}}.to_pretty_json.should eq(%({\n  "foo": {\n    "bar": 1\n  }\n}))
     end
 
     it "does for empty Hash" do
       ({} of Nil => Nil).to_pretty_json.should eq(%({}))
     end
-  end
 
-  it "generates an array with JSON::Builder" do
-    result = String.build do |io|
-      io.json_array do |array|
-        array.push 1
-        array.push do
-          io.json_array do |array2|
-            array2 << 2
-            array2 << 3
-          end
-        end
-      end
+    it "does for Array with indent" do
+      [1, 2, 3].to_pretty_json(indent: " ").should eq("[\n 1,\n 2,\n 3\n]")
     end
-    result.should eq("[1,[2,3]]")
+
+    it "does for nested Hash with indent" do
+      {"foo" => {"bar" => 1}}.to_pretty_json(indent: " ").should eq(%({\n "foo": {\n  "bar": 1\n }\n}))
+    end
+
+    it "does for time" do
+      Time.utc(2016, 11, 16, 12, 55, 48).to_json.should eq(%("2016-11-16T12:55:48+0000"))
+    end
   end
 end

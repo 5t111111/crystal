@@ -1,111 +1,55 @@
-lib LibC
-  ifdef darwin
-    struct Stat
-      st_dev : Int32
-      st_ino : Int32
-      st_mode : LibC::ModeT
-      st_nlink : UInt16
-      st_uid : UInt32
-      st_gid : UInt32
-      st_rdev : Int32
-      st_atimespec : LibC::TimeSpec
-      st_mtimespec : LibC::TimeSpec
-      st_ctimespec : LibC::TimeSpec
-      st_size : Int64
-      st_blocks : Int64
-      st_blksize : Int32
-      st_flags : UInt32
-      st_gen : UInt32
-      st_lspare : Int32
-      st_qspare1 : Int64
-      st_qspare2 : Int64
-    end
-  elsif linux
-    ifdef x86_64
-      struct Stat
-        st_dev : UInt64
-        st_ino : UInt64
-        st_nlink : UInt64
-        st_mode : LibC::ModeT
-        st_uid : UInt32
-        st_gid : UInt32
-        __pad0 : UInt32
-        st_rdev : UInt32
-        st_size : Int64
-        st_blksize : Int64
-        st_blocks : Int64
-        st_atimespec : LibC::TimeSpec
-        st_mtimespec : LibC::TimeSpec
-        st_ctimespec : LibC::TimeSpec
-        __unused0 : Int64
-        __unused1 : Int64
-        __unused2 : Int64
-      end
-    else
-      struct Stat
-        st_dev : UInt64
-        __pad1 : UInt16
-        st_ino : UInt32
-        st_mode : LibC::ModeT
-        st_nlink : UInt32
-        st_uid : UInt32
-        st_gid : UInt32
-        st_rdev : UInt64
-        __pad2 : Int16
-        st_size : UInt32
-        st_blksize : Int32
-        st_blocks : Int32
-        st_atimespec : LibC::TimeSpec
-        st_mtimespec : LibC::TimeSpec
-        st_ctimespec : LibC::TimeSpec
-        __unused4 : UInt64
-        __unused5 : UInt64
-      end
-    end
-  end
-
-  S_ISVTX  = 0o001000
-  S_ISGID  = 0o002000
-  S_ISUID  = 0o004000
-  S_IFIFO  = 0o010000
-  S_IFCHR  = 0o020000
-  S_IFDIR  = 0o040000
-  S_IFBLK  = 0o060000
-  S_IFREG  = 0o100000
-  S_IFLNK  = 0o120000
-  S_IFSOCK = 0o140000
-  S_IFMT   = 0o170000
-
-  fun stat(path : Char*, stat : Stat*) : Int
-  fun lstat(path : Char*, stat : Stat *) : Int
-  fun fstat(fileno : Int, stat : Stat*) : Int
-end
+require "c/sys/stat"
 
 class File
   struct Stat
-    def initialize(filename : String)
-      if LibC.stat(filename, out @stat) != 0
-        raise Errno.new("Unable to get stat for '#{filename}'")
-      end
+    def self.new(filename : String)
+      File.stat(filename)
     end
 
-    def initialize(@stat : LibC::Stat)
-    end
+    {% if flag?(:win32) %}
+      # :nodoc:
+      def initialize(@stat : LibC::Stat64)
+      end
+    {% else %}
+      # :nodoc:
+      def initialize(@stat : LibC::Stat)
+      end
+    {% end %}
 
     def atime
-      time @stat.st_atimespec
+      {% if flag?(:darwin) %}
+        time @stat.st_atimespec
+      {% elsif flag?(:win32) %}
+        time @stat.st_atime
+      {% else %}
+        time @stat.st_atim
+      {% end %}
     end
 
     def blksize
-      @stat.st_blksize
+      {% if flag?(:win32) %}
+        raise NotImplementedError.new("File::Stat#blksize")
+      {% else %}
+        @stat.st_blksize
+      {% end %}
     end
 
     def blocks
-      @stat.st_blocks
+      {% if flag?(:win32) %}
+        raise NotImplementedError.new("File::Stat#blocks")
+      {% else %}
+        @stat.st_blocks
+      {% end %}
     end
 
     def ctime
-      time @stat.st_ctimespec
+      {% if flag?(:darwin) %}
+        time @stat.st_ctimespec
+      {% elsif flag?(:win32) %}
+        time @stat.st_ctime
+      {% else %}
+        time @stat.st_ctim
+      {% end %}
     end
 
     def dev
@@ -130,7 +74,13 @@ class File
     end
 
     def mtime
-      time @stat.st_mtimespec
+      {% if flag?(:darwin) %}
+        time @stat.st_mtimespec
+      {% elsif flag?(:win32) %}
+        time @stat.st_mtime
+      {% else %}
+        time @stat.st_mtim
+      {% end %}
     end
 
     def nlink
@@ -142,7 +92,7 @@ class File
     end
 
     def size
-      @stat.st_size
+      @stat.st_size.to_u64
     end
 
     def uid
@@ -154,7 +104,7 @@ class File
       io << " dev=0x"
       dev.to_s(16, io)
       io << ", ino=" << ino
-      io << ", mode=0"
+      io << ", mode=0o"
       mode.to_s(8, io)
       io << ", nlink=" << nlink
       io << ", uid=" << uid
@@ -162,12 +112,48 @@ class File
       io << ", rdev=0x"
       rdev.to_s(16, io)
       io << ", size=" << size
-      io << ", blksize=" << blksize
-      io << ", blocks=" << blocks
+      {% unless flag?(:win32) %}
+        # These two getters raise NotImplementedError on windows.
+        io << ", blksize=" << blksize
+        io << ", blocks=" << blocks
+      {% end %}
       io << ", atime=" << atime
       io << ", mtime=" << mtime
       io << ", ctime=" << ctime
       io << ">"
+    end
+
+    def pretty_print(pp)
+      pp.surround("#<File::Stat", ">", left_break: " ", right_break: nil) do
+        pp.text "dev=0x#{dev.to_s(16)}"
+        pp.comma
+        pp.text "ino=#{ino}"
+        pp.comma
+        pp.text "mode=0o#{mode.to_s(8)}"
+        pp.comma
+        pp.text "nlink=#{nlink}"
+        pp.comma
+        pp.text "uid=#{uid}"
+        pp.comma
+        pp.text "gid=#{gid}"
+        pp.comma
+        pp.text "rdev=0x#{rdev.to_s(16)}"
+        pp.comma
+        pp.text "size=#{size}"
+        pp.comma
+        {% unless flag?(:win32) %}
+          # These two getters raise NotImplementedError on windows.
+          pp.text "blksize=#{blksize}"
+          pp.comma
+          pp.text "blocks=#{blocks}"
+          pp.comma
+        {% end %}
+        pp.text "atime=#{atime}"
+        pp.comma
+        pp.text "mtime=#{mtime}"
+        pp.comma
+        pp.text "ctime=#{ctime}"
+      end
     end
 
     def blockdev?
@@ -184,6 +170,10 @@ class File
 
     def file?
       (@stat.st_mode & LibC::S_IFMT) == LibC::S_IFREG
+    end
+
+    def pipe?
+      (@stat.st_mode & LibC::S_IFMT) == LibC::S_IFIFO
     end
 
     def setuid?
@@ -206,8 +196,14 @@ class File
       (@stat.st_mode & LibC::S_IFMT) == LibC::S_ISVTX
     end
 
-    private def time(value)
-      Time.new value, Time::Kind::Utc
-    end
+    {% if flag?(:win32) %}
+      private def time(value)
+        Time.epoch(value)
+      end
+    {% else %}
+      private def time(value)
+        Time.new value, Time::Kind::Utc
+      end
+    {% end %}
   end
 end

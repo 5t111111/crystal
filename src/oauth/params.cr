@@ -6,23 +6,23 @@ struct OAuth::Params
 
   def add(key, value)
     if value
-      @params << {CGI.escape(key), CGI.escape(value)}
+      @params << {URI.escape(key), URI.escape(value)}
     end
   end
 
   def add_query(query)
-    CGI.parse(query) do |key, value|
+    HTTP::Params.parse(query) do |key, value|
       add key, value
     end
   end
 
   def to_s(io : IO)
     @params.sort_by! &.[0]
-    @params.each_with_index do |tuple, i|
+    @params.each_with_index do |(key, value), i|
       io << "%26" if i > 0
-      CGI.escape tuple[0], io
+      URI.escape key, io
       io << "%3D"
-      CGI.escape tuple[1], io
+      URI.escape value, io
     end
   end
 end

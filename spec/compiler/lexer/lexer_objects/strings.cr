@@ -1,5 +1,8 @@
 module LexerObjects
   class Strings
+    @lexer : Lexer
+    @token : Token
+
     def initialize(@lexer)
       @token = Token.new
     end
@@ -27,13 +30,13 @@ module LexerObjects
     def next_unicode_tokens_should_be(expected_unicode_codes : Array)
       @token = lexer.next_string_token(token.delimiter_state)
       token.type.should eq(:STRING)
-      (token.value as String).chars.map(&.ord).should eq(expected_unicode_codes)
+      token.value.as(String).chars.map(&.ord).should eq(expected_unicode_codes)
     end
 
     def next_unicode_tokens_should_be(expected_unicode_codes)
       @token = lexer.next_string_token(token.delimiter_state)
       token.type.should eq(:STRING)
-      (token.value as String).char_at(0).ord.should eq(expected_unicode_codes)
+      token.value.as(String).char_at(0).ord.should eq(expected_unicode_codes)
     end
 
     def next_string_token_should_be(expected_string)

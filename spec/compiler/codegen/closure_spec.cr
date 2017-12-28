@@ -205,7 +205,7 @@ describe "Code gen: closure" do
   it "codegens closure with self and var" do
     run("
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo
@@ -225,7 +225,7 @@ describe "Code gen: closure" do
   it "codegens closure with implicit self and var" do
     run("
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo
@@ -245,7 +245,7 @@ describe "Code gen: closure" do
   it "codegens closure with instance var and var" do
     run("
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo
@@ -261,7 +261,7 @@ describe "Code gen: closure" do
   it "codegens closure with instance var" do
     run("
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo
@@ -280,7 +280,7 @@ describe "Code gen: closure" do
       end
 
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo
@@ -422,10 +422,10 @@ describe "Code gen: closure" do
       )).to_i.should eq(10)
   end
 
-  it "codegens fun literal with struct" do
+  it "codegens proc literal with struct" do
     run(%(
       struct Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def x
@@ -443,7 +443,7 @@ describe "Code gen: closure" do
   it "codegens closure with struct" do
     run(%(
       struct Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def x
@@ -464,7 +464,7 @@ describe "Code gen: closure" do
   it "codegens closure with self and arguments" do
     run(%(
       class Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo(x)
@@ -492,7 +492,7 @@ describe "Code gen: closure" do
       )).to_i.should eq(1)
   end
 
-  it "transforms block to fun literal" do
+  it "transforms block to proc literal" do
     run("
       def foo(&block : Int32 -> Int32)
         block.call(1)
@@ -505,9 +505,9 @@ describe "Code gen: closure" do
       ").to_i.should eq(2)
   end
 
-  it "transforms block to fun literal with free var" do
+  it "transforms block to proc literal with free var" do
     run("
-      def foo(&block : Int32 -> U)
+      def foo(&block : Int32 -> U) forall U
         block
       end
 
@@ -518,7 +518,7 @@ describe "Code gen: closure" do
       ").to_i.should eq(10)
   end
 
-  it "allows passing block as fun literal to new and to initialize" do
+  it "allows passing block as proc literal to new and to initialize" do
     run("
       class Foo
         def initialize(&block : Int32 -> Float64)
@@ -536,9 +536,9 @@ describe "Code gen: closure" do
       ").to_i.should eq(2)
   end
 
-  it "allows giving less block args when transforming block to fun literal" do
+  it "allows giving less block args when transforming block to proc literal" do
     run("
-      def foo(&block : Int32 -> U)
+      def foo(&block : Int32 -> U) forall U
         block.call(1)
       end
 
@@ -550,7 +550,7 @@ describe "Code gen: closure" do
       ").to_i.should eq(2)
   end
 
-  it "allows passing fun literal to def that captures block with &" do
+  it "allows passing proc literal to def that captures block with &" do
     run("
       def foo(&block : Int32 -> Int32)
         block.call(1)
@@ -578,7 +578,7 @@ describe "Code gen: closure" do
   it "closures struct self" do
     run(%(
       struct Foo
-        def initialize(@x)
+        def initialize(@x : Int32)
         end
 
         def foo
@@ -588,5 +588,97 @@ describe "Code gen: closure" do
 
       Foo.new(1).foo.call
       )).to_i.should eq(1)
+  end
+
+  it "doesn't form a closure if invoking class method" do
+    run(%(
+      require "prelude"
+
+      class Foo
+        def self.foo
+          ->{ bar }.closure?
+        end
+
+        def self.bar
+        end
+      end
+
+      Foo.foo
+      )).to_b.should be_false
+  end
+
+  it "doesn't form a closure if invoking class method with self" do
+    run(%(
+      require "prelude"
+
+      class Foo
+        def self.foo
+          ->{ self.bar }.closure?
+        end
+
+        def self.bar
+        end
+      end
+
+      Foo.foo
+      )).to_b.should be_false
+  end
+
+  it "captures block and accesses local variable (#2050)" do
+    run(%(
+      require "prelude"
+
+      def capture(&block)
+        block
+      end
+
+      coco = 1
+      capture do
+        coco
+      end
+      coco
+      )).to_i.should eq(1)
+  end
+
+  it "codegens closured self in block (#3388)" do
+    run(%(
+      class Foo
+        def initialize(@x : Int32)
+        end
+
+        def x
+          @x
+        end
+
+        def foo
+          yield
+          ->{ self }
+        end
+      end
+
+      foo = Foo.new(42)
+      foo2 = foo.foo { }
+      foo2.call.x
+      )).to_i.should eq(42)
+  end
+
+  it "doesn't incorrectly consider local as closured (#4948)" do
+    codegen(%(
+      arg = 1
+
+      f1 = ->{
+        # Here 'local' isn't to be confused with
+        # the outer closured 'local'
+        local = 1
+        local + arg
+      }
+
+      arg = 2
+
+      local = 4_i64
+      f2 = ->{ local.to_i }
+
+      f1.call + f2.call
+    ))
   end
 end

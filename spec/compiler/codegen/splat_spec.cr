@@ -4,11 +4,11 @@ describe "Code gen: splat" do
   it "splats" do
     run(%(
       struct Tuple
-        def length; {{@length}}; end
+        def size; {{T.size}}; end
       end
 
       def foo(*args)
-        args.length
+        args.size
       end
 
       foo 1, 1, 1
@@ -18,29 +18,15 @@ describe "Code gen: splat" do
   it "splats with another arg" do
     run(%(
       struct Tuple
-        def length; {{@length}}; end
+        def size; {{T.size}}; end
       end
 
       def foo(x, *args)
-        x + args.length
+        x + args.size
       end
 
       foo 10, 1, 1
       )).to_i.should eq(12)
-  end
-
-  it "splats with two other args" do
-    run(%(
-      struct Tuple
-        def length; {{@length}}; end
-      end
-
-      def foo(x, *args, z)
-        x + args.length + z
-      end
-
-      foo 10, 2, 20
-      )).to_i.should eq(31)
   end
 
   it "splats on call" do
@@ -57,11 +43,11 @@ describe "Code gen: splat" do
   it "splats without args" do
     run(%(
       struct Tuple
-        def length; {{@length}}; end
+        def size; {{T.size}}; end
       end
 
       def foo(*args)
-        args.length
+        args.size
       end
 
       foo
@@ -71,11 +57,11 @@ describe "Code gen: splat" do
   it "splats with default value" do
     run(%(
       struct Tuple
-        def length; {{@length}}; end
+        def size; {{T.size}}; end
       end
 
       def foo(x = 100, *args)
-        x + args.length
+        x + args.size
       end
 
       foo
@@ -85,11 +71,11 @@ describe "Code gen: splat" do
   it "splats with default value (2)" do
     run(%(
       struct Tuple
-        def length; {{@length}}; end
+        def size; {{T.size}}; end
       end
 
       def foo(x, y = 100, *args)
-        x + y + args.length
+        x + y + args.size
       end
 
       foo 10
@@ -99,11 +85,11 @@ describe "Code gen: splat" do
   it "splats with default value (3)" do
     run(%(
       struct Tuple
-        def length; {{@length}}; end
+        def size; {{T.size}}; end
       end
 
       def foo(x, y = 100, *args)
-        x + y + args.length
+        x + y + args.size
       end
 
       foo 10, 20, 30, 40
@@ -113,6 +99,9 @@ describe "Code gen: splat" do
   it "splats in initialize" do
     run(%(
       class Foo
+        @x : Int32
+        @y : Int32
+
         def initialize(*args)
           @x, @y = args
         end
@@ -129,5 +118,56 @@ describe "Code gen: splat" do
       foo = Foo.new 1, 2
       foo.x + foo.y
       )).to_i.should eq(3)
+  end
+
+  it "does #2407" do
+    codegen(%(
+      lib LibC
+        fun exit(Int32) : NoReturn
+      end
+
+      def some
+        yield(1 || (LibC.exit(1); ""))
+      end
+
+      def foo(*objects)
+        bar *objects
+      end
+
+      def bar(objects)
+      end
+
+      some do |value|
+        foo value
+      end
+      ))
+  end
+
+  it "evaluates splat argument just once (#2677)" do
+    run(%(
+      class Global
+        @@x = 0
+
+        def self.x=(@@x)
+        end
+
+        def self.x
+          @@x
+        end
+      end
+
+      def data
+        Global.x += 1
+        {Global.x, Global.x, Global.x}
+      end
+
+      def test(x, y, z)
+        x + y + z
+      end
+
+      v = test(*data)
+
+      Global.x
+      )).to_i.should eq(1)
   end
 end

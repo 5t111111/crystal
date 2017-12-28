@@ -30,7 +30,7 @@ describe XML do
 
     attrs = h1.attributes
     attrs.empty?.should be_false
-    attrs.length.should eq(1)
+    attrs.size.should eq(1)
 
     attr = attrs[0]
     attr.name.should eq("class")
@@ -40,7 +40,7 @@ describe XML do
   end
 
   it "parses HTML from IO" do
-    io = StringIO.new(%(\
+    io = IO::Memory.new(%(\
       <!doctype html>
       <html>
       <head>
@@ -55,5 +55,28 @@ describe XML do
     doc = XML.parse_html(io)
     html = doc.children[1]
     html.name.should eq("html")
+  end
+
+  it "parses html5 (#1404)" do
+    html5 = "<html><body><nav>Test</nav></body></html>"
+    xml = XML.parse_html(html5)
+    xml.errors.should_not be_nil
+    xml.xpath_node("//html/body/nav").should_not be_nil
+  end
+
+  it "raises error when parsing empty string (#2752)" do
+    expect_raises XML::Error, "Document is empty" do
+      XML.parse_html("")
+    end
+  end
+
+  it "gets name of HTML document node (#4040)" do
+    doc = XML.parse_html(%(\
+      <!doctype html>
+      <html>
+      </html>
+    ))
+    doc.document?.should be_true
+    doc.name.should eq("document")
   end
 end

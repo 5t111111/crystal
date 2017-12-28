@@ -1,13 +1,14 @@
 require "../syntax/ast"
 require "../compiler"
+require "./typed_def_processor"
 require "json"
 
 module Crystal
   class ImplementationResult
-    json_mapping({
-      status:           {type: String},
-      message:          {type: String},
-      implementations:  {type: Array(ImplementationTrace), nilable: true},
+    JSON.mapping({
+      status:          {type: String},
+      message:         {type: String},
+      implementations: {type: Array(ImplementationTrace), nilable: true},
     })
 
     def initialize(@status, @message)
@@ -32,7 +33,7 @@ module Crystal
   # It keeps track of macro expansion in a human friendly way and
   # pointing to the exact line an expansion and method definition occurs.
   class ImplementationTrace
-    json_mapping({
+    JSON.mapping({
       line:     {type: Int32},
       column:   {type: Int32},
       filename: {type: String},
@@ -43,15 +44,15 @@ module Crystal
     def initialize(loc : Location)
       f = loc.filename
       if f.is_a?(String)
-        self.line = loc.line_number
-        self.column = loc.column_number
-        self.filename = f
+        @line = loc.line_number
+        @column = loc.column_number
+        @filename = f
       elsif f.is_a?(VirtualFile)
         macro_location = f.macro.location.not_nil!
-        self.macro = f.macro.name
-        self.filename = macro_location.filename.to_s
-        self.line = macro_location.line_number + loc.line_number
-        self.column = loc.column_number
+        @macro = f.macro.name
+        @filename = macro_location.filename.to_s
+        @line = macro_location.line_number + loc.line_number
+        @column = loc.column_number
       else
         raise "not implemented"
       end
@@ -84,51 +85,23 @@ module Crystal
   end
 
   class ImplementationsVisitor < Visitor
-    getter locations
+    include TypedDefProcessor
 
-    def initialize(@target_location)
+    getter locations : Array(Location)
+
+    def initialize(@target_location : Location)
       @locations = [] of Location
     end
 
-    def process_type(type)
-      if type.is_a?(ContainedType)
-        type.types.values.each do |inner_type|
-          process_type(inner_type)
-        end
-      end
-
-      process_type type.metaclass if type.metaclass != type
-
-      if type.is_a?(DefInstanceContainer)
-        type.def_instances.values.try do |typed_defs|
-          typed_defs.each do |typed_def|
-            typed_def.accept(self)
-          end
-        end
-      end
-
-      if type.is_a?(GenericType)
-        type.generic_types.values.each do |instanced_type|
-          process_type(instanced_type)
-        end
-      end
-    end
-
     def process(result : Compiler::Result)
-      result.program.def_instances.each_value do |typed_def|
-        typed_def.accept(self)
-      end
-
-      result.program.types.values.each do |type|
-        process_type type
-      end
+      process_result result
 
       result.node.accept(self)
 
       if @locations.empty?
         return ImplementationResult.new("failed", "no implementations or method call found")
       else
-        res = ImplementationResult.new("ok", "#{@locations.count} implementation#{@locations.count > 1 ? "s" : ""} found")
+        res = ImplementationResult.new("ok", "#{@locations.size} implementation#{@locations.size > 1 ? "s" : ""} found")
         res.implementations = @locations.map { |loc| ImplementationTrace.build(loc) }
         return res
       end
@@ -137,13 +110,11 @@ module Crystal
     def visit(node : Call)
       if node.location
         if @target_location.between?(node.name_location, node.name_end_location)
-
           if target_defs = node.target_defs
             target_defs.each do |target_def|
               @locations << target_def.location.not_nil!
             end
           end
-
         else
           contains_target(node)
         end

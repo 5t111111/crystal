@@ -1,97 +1,23 @@
-lib LibC
-  type Dir = Void*
+require "c/dirent"
+require "c/unistd"
+require "c/sys/stat"
 
-  ifdef darwin
-    struct DirEntry
-      d_ino : Int32
-      reclen : UInt16
-      type : UInt8
-      namelen : UInt8
-      name : UInt8[1024]
-    end
-  elsif linux
-   struct DirEntry
-      d_ino : UInt64
-      d_off : Int64
-      reclen : UInt16
-      type : UInt8
-      name : UInt8[256]
-    end
-  end
-
-  ifdef linux
-    struct Glob
-      pathc : LibC::SizeT
-      pathv : UInt8**
-      offs : LibC::SizeT
-      flags : Int32
-      dummy : UInt8[40]
-    end
-  elsif darwin
-    struct Glob
-      pathc : LibC::SizeT
-      matchc : Int32
-      offs : LibC::SizeT
-      flags : Int32
-      pathv : UInt8**
-      dummy : UInt8[48]
-    end
-  end
-
-  ifdef linux
-    enum GlobFlags
-      APPEND = 1 << 5
-      BRACE  = 1 << 10
-      TILDE  = 1 << 12
-    end
-  elsif darwin
-    enum GlobFlags
-      APPEND = 0x0001
-      BRACE  = 0x0080
-      TILDE  = 0x0800
-    end
-  end
-
-  enum GlobErrors
-    NOSPACE = 1
-    ABORTED = 2
-    NOMATCH = 3
-  end
-
-  fun getcwd(buffer : UInt8*, size : Int32) : UInt8*
-  fun chdir = chdir(path : UInt8*) : Int32
-  fun opendir(name : UInt8*) : Dir*
-  fun closedir(dir : Dir*) : Int32
-
-  fun mkdir(path : UInt8*, mode : LibC::ModeT) : Int32
-  fun rmdir(path : UInt8*) : Int32
-
-  ifdef darwin
-    fun readdir(dir : Dir*) : DirEntry*
-  elsif linux
-    fun readdir = readdir64(dir : Dir*) : DirEntry*
-  end
-
-  fun rewinddir(dir : Dir*)
-
-  fun glob(pattern : UInt8*, flags : GlobFlags, errfunc : (UInt8*, Int32) -> Int32, result : Glob*) : Int32
-  fun globfree(result : Glob*)
-end
-
-# Objects of class Dir are directory streams representing directories in the underlying file system.
-# They provide a variety of ways to list directories and their contents. See also `File`.
+# Objects of class `Dir` are directory streams representing directories in the underlying file system.
+# They provide a variety of ways to list directories and their contents.
 #
-# The directory used in these examples contains the two regular files (config.h and main.rb),
-# the parent directory (..), and the directory itself (.).
+# The directory used in these examples contains the two regular files (`config.h` and `main.rb`),
+# the parent directory (`..`), and the directory itself (`.`).
+#
+# See also: `File`.
 class Dir
   include Enumerable(String)
-  include Iterable
+  include Iterable(String)
 
-  getter path
+  getter path : String
 
   # Returns a new directory object for the named directory.
   def initialize(@path)
-    @dir = LibC.opendir(@path)
+    @dir = LibC.opendir(@path.check_no_null_byte)
     unless @dir
       raise Errno.new("Error opening directory '#{@path}'")
     end
@@ -99,7 +25,7 @@ class Dir
   end
 
   # Alias for `new(path)`
-  def self.open(path)
+  def self.open(path) : self
     new path
   end
 
@@ -118,8 +44,11 @@ class Dir
   # passing the filename of each entry as a parameter to the block.
   #
   # ```
+  # Dir.mkdir("testdir")
+  # File.write("testdir/config.h", "")
+  #
   # d = Dir.new("testdir")
-  # d.each  {|x| puts "Got #{x}" }
+  # d.each_entry { |x| puts "Got #{x}" }
   # ```
   #
   # produces:
@@ -128,33 +57,80 @@ class Dir
   # Got .
   # Got ..
   # Got config.h
-  # Got main.rb
   # ```
-  def each
+  def each_entry : Nil
     while entry = read
       yield entry
     end
   end
 
-  def each
+  def each_entry
     EntryIterator.new(self)
   end
 
-  # Reads the next entry from dir and returns it as a string. Returns nil at the end of the stream.
+  # Returns an array containing all of the filenames in the given directory.
+  def entries : Array(String)
+    entries = [] of String
+    each_entry do |filename|
+      entries << filename
+    end
+    entries
+  end
+
+  # Calls the block once for each entry except for `.` and `..` in this directory,
+  # passing the filename of each entry as a parameter to the block.
+  #
+  # ```
+  # Dir.mkdir("testdir")
+  # File.write("testdir/config.h", "")
+  #
+  # d = Dir.new("testdir")
+  # d.each_entry { |x| puts "Got #{x}" }
+  # ```
+  #
+  # produces:
+  #
+  # ```text
+  # Got config.h
+  # ```
+  def each_child : Nil
+    excluded = {".", ".."}
+    while entry = read
+      yield entry unless excluded.includes?(entry)
+    end
+  end
+
+  def each_child
+    ChildIterator.new(self)
+  end
+
+  # Returns an array containing all of the filenames except for `.` and `..`
+  # in the given directory.
+  def children : Array(String)
+    entries = [] of String
+    each_child do |filename|
+      entries << filename
+    end
+    entries
+  end
+
+  # Reads the next entry from dir and returns it as a string. Returns `nil` at the end of the stream.
   #
   # ```
   # d = Dir.new("testdir")
-  # d.read   #=> "."
-  # d.read   #=> ".."
-  # d.read   #=> "config.h"
+  # array = [] of String
+  # while file = d.read
+  #   array << file
+  # end
+  # array.sort # => [".", "..", "config.h"]
   # ```
   def read
     # readdir() returns NULL for failure and sets errno or returns NULL for EOF but leaves errno as is.  wtf.
-    LibC.errno = 0
+    Errno.value = 0
     ent = LibC.readdir(@dir)
     if ent
-      String.new(ent.value.name.buffer)
-    elsif LibC.errno != 0
+      String.new(ent.value.d_name.to_unsafe)
+    elsif Errno.value != 0
       raise Errno.new("readdir")
     else
       nil
@@ -176,113 +152,71 @@ class Dir
     @closed = true
   end
 
-  def self.working_directory
+  # Returns the current working directory.
+  def self.current : String
     if dir = LibC.getcwd(nil, 0)
-      String.new(dir).tap { LibC.free(dir as Void*) }
+      String.new(dir).tap { LibC.free(dir.as(Void*)) }
     else
       raise Errno.new("getcwd")
     end
   end
 
   # Changes the current working directory of the process to the given string.
-  def self.chdir path
-    if LibC.chdir(path) != 0
-      raise Errno.new("Error while changing directory")
+  def self.cd(path)
+    if LibC.chdir(path.check_no_null_byte) != 0
+      raise Errno.new("Error while changing directory to #{path.inspect}")
     end
   end
 
   # Changes the current working directory of the process to the given string
   # and invokes the block, restoring the original working directory
-  # when the block exists.
-  def self.chdir(path)
-    old = working_directory
+  # when the block exits.
+  def self.cd(path)
+    old = current
     begin
-      chdir(path)
+      cd(path)
       yield
     ensure
-      chdir(old)
+      cd(old)
     end
   end
 
-  # Alias for `chdir`.
-  def self.cd path
-    chdir(path)
-  end
-
-  # Calls the block once for each entry in the named directory,
-  # passing the filename of each entry as a parameter to the block.
-  def self.foreach(dirname)
+  # See `#each_entry`.
+  def self.each_entry(dirname)
     Dir.open(dirname) do |dir|
-      dir.each do |filename|
+      dir.each_entry do |filename|
         yield filename
       end
     end
   end
 
-  # Returns an array containing all of the filenames in the given directory.
-  def self.entries(dirname)
-    entries = [] of String
-    foreach(dirname) do |filename|
-      entries << filename
-    end
-    entries
-  end
-
-  def self.[](*patterns)
-    glob(patterns)
-  end
-
-  def self.[](patterns : Enumerable(String))
-    glob(patterns)
-  end
-
-  def self.glob(*patterns)
-    glob(patterns)
-  end
-
-  def self.glob(*patterns)
-    glob(patterns) do |pattern|
-      yield pattern
+  # See `#entries`.
+  def self.entries(dirname) : Array(String)
+    Dir.open(dirname) do |dir|
+      return dir.entries
     end
   end
 
-  def self.glob(patterns : Enumerable(String))
-    paths = [] of String
-    glob(patterns) do |path|
-      paths << path
-    end
-    paths
-  end
-
-  def self.glob(patterns : Enumerable(String))
-    paths = LibC::Glob.new
-    flags = LibC::GlobFlags::BRACE | LibC::GlobFlags::TILDE
-    errfunc = -> (_path : UInt8*, _errno : Int32) { 0 }
-
-    patterns.each do |pattern|
-      result = LibC.glob(pattern, flags, errfunc, pointerof(paths))
-
-      if result == LibC::GlobErrors::NOSPACE
-        raise GlobError.new "Ran out of memory"
-      elsif result == LibC::GlobErrors::ABORTED
-        raise GlobError.new "Read error"
+  # See `#each_child`.
+  def self.each_child(dirname)
+    Dir.open(dirname) do |dir|
+      dir.each_child do |filename|
+        yield filename
       end
-
-      flags |= LibC::GlobFlags::APPEND
     end
-
-    Slice(UInt8*).new(paths.pathv, paths.pathc.to_i32).each do |path|
-      yield String.new(path)
-    end
-
-    nil
-  ensure
-    LibC.globfree(pointerof(paths))
   end
 
-  def self.exists?(path)
-    if LibC.stat(path, out stat) != 0
-      if LibC.errno == Errno::ENOENT
+  # See `#children`.
+  def self.children(dirname) : Array(String)
+    Dir.open(dirname) do |dir|
+      return dir.children
+    end
+  end
+
+  # Returns `true` if the given path exists and is a directory
+  def self.exists?(path) : Bool
+    if LibC.stat(path.check_no_null_byte, out stat) != 0
+      if Errno.value == Errno::ENOENT || Errno.value == Errno::ENOTDIR
         return false
       else
         raise Errno.new("stat")
@@ -291,14 +225,37 @@ class Dir
     File::Stat.new(stat).directory?
   end
 
-  def self.mkdir(path, mode=0o777)
-    if LibC.mkdir(path, LibC::ModeT.cast(mode)) == -1
+  # Returns `true` if the directory at *path* is empty, otherwise returns `false`.
+  # Raises `Errno` if the directory at *path* does not exist.
+  #
+  # ```
+  # Dir.mkdir("bar")
+  # Dir.empty?("bar") # => true
+  # File.write("bar/a_file", "The content")
+  # Dir.empty?("bar") # => false
+  # ```
+  def self.empty?(path) : Bool
+    raise Errno.new("Error determining size of '#{path}'") unless exists?(path)
+
+    each_child(path) do |f|
+      return false
+    end
+    true
+  end
+
+  # Creates a new directory at the given path. The linux-style permission mode
+  # can be specified, with a default of 777 (0o777).
+  def self.mkdir(path, mode = 0o777)
+    if LibC.mkdir(path.check_no_null_byte, mode) == -1
       raise Errno.new("Unable to create directory '#{path}'")
     end
     0
   end
 
-  def self.mkdir_p(path, mode=0o777)
+  # Creates a new directory at the given path, including any non-existing
+  # intermediate directories. The linux-style permission mode can be specified,
+  # with a default of 777 (0o777).
+  def self.mkdir_p(path, mode = 0o777)
     return 0 if Dir.exists?(path)
 
     components = path.split(File::SEPARATOR)
@@ -317,8 +274,9 @@ class Dir
     0
   end
 
+  # Removes the directory at the given path.
   def self.rmdir(path)
-    if LibC.rmdir(path) == -1
+    if LibC.rmdir(path.check_no_null_byte) == -1
       raise Errno.new("Unable to remove directory '#{path}'")
     end
     0
@@ -328,11 +286,18 @@ class Dir
     io << "#<Dir:" << @path << ">"
   end
 
-  # :nodoc:
-  struct EntryIterator
+  def inspect(io)
+    to_s(io)
+  end
+
+  def pretty_print(pp)
+    pp.text inspect
+  end
+
+  private struct EntryIterator
     include Iterator(String)
 
-    def initialize(@dir)
+    def initialize(@dir : Dir)
     end
 
     def next
@@ -344,7 +309,26 @@ class Dir
       self
     end
   end
+
+  private struct ChildIterator
+    include Iterator(String)
+
+    def initialize(@dir : Dir)
+    end
+
+    def next
+      excluded = {".", ".."}
+      while entry = @dir.read
+        return entry unless excluded.includes?(entry)
+      end
+      stop
+    end
+
+    def rewind
+      @dir.rewind
+      self
+    end
+  end
 end
 
-class GlobError < Exception
-end
+require "./dir/*"

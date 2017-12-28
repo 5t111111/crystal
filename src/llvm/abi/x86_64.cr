@@ -2,31 +2,31 @@ require "../abi"
 
 # Based on https://github.com/rust-lang/rust/blob/master/src/librustc_trans/trans/cabi_x86_64.rs
 class LLVM::ABI::X86_64 < LLVM::ABI
-  def abi_info(atys : Array(Type), rty : Type, ret_def : Bool)
-    arg_tys = Array(LLVM::Type).new(atys.length)
+  def abi_info(atys : Array(Type), rty : Type, ret_def : Bool, context : Context)
+    arg_tys = Array(LLVM::Type).new(atys.size)
     arg_tys = atys.map do |arg_type|
-      x86_64_type(arg_type, Attribute::ByVal) { |cls| pass_by_val?(cls) }
+      x86_64_type(arg_type, Attribute::ByVal, context) { |cls| pass_by_val?(cls) }
     end
 
     if ret_def
-      ret_ty = x86_64_type(rty, Attribute::StructRet) { |cls| sret?(cls) }
+      ret_ty = x86_64_type(rty, Attribute::StructRet, context) { |cls| sret?(cls) }
     else
-      ret_ty = ArgType.direct(LLVM::Void)
+      ret_ty = ArgType.direct(context.void)
     end
 
     FunctionType.new arg_tys, ret_ty
   end
 
-  def x86_64_type(type, ind_attr)
+  def x86_64_type(type, ind_attr, context)
     if register?(type)
-      attr = type == LLVM::Int1 ? Attribute::ZExt : nil
+      attr = type == context.int1 ? Attribute::ZExt : nil
       ArgType.direct(type, attr: attr)
     else
       cls = classify(type)
       if yield cls
         ArgType.indirect(type, ind_attr)
       else
-        ArgType.direct(type, llreg(cls))
+        ArgType.direct(type, llreg(context, cls))
       end
     end
   end
@@ -90,7 +90,7 @@ class LLVM::ABI::X86_64 < LLVM::ABI
     when Type::Kind::Struct
       classify_struct(ty.struct_element_types, cls, ix, off, ty.packed_struct?)
     when Type::Kind::Array
-      len = ty.array_length
+      len = ty.array_size
       elt = ty.element_type
       eltsz = size(elt)
       i = 0
@@ -115,7 +115,7 @@ class LLVM::ABI::X86_64 < LLVM::ABI
   def fixup(ty, cls)
     i = 0
     ty_kind = ty.kind
-    e = cls.length
+    e = cls.size
     if e > 2 && (ty_kind == Type::Kind::Struct || ty_kind == Type::Kind::Array)
       if cls[i].sse?
         i += 1
@@ -188,30 +188,30 @@ class LLVM::ABI::X86_64 < LLVM::ABI
     reg_classes.fill(RegClass::Memory)
   end
 
-  def llreg(reg_classes)
+  def llreg(context, reg_classes)
     types = Array(Type).new
     i = 0
-    e = reg_classes.length
+    e = reg_classes.size
     while i < e
       case reg_classes[i]
       when RegClass::Int
-        types << LLVM::Int64
+        types << context.int64
       when RegClass::SSEFv
-        vec_len = llvec_len(reg_classes[i + 1 .. -1])
-        vec_type = Type.vector(LLVM::Float, vec_len * 2)
+        vec_len = llvec_len(reg_classes[i + 1..-1])
+        vec_type = context.float.vector(vec_len * 2)
         types << vec_type
         i += vec_len
         next
       when RegClass::SSEFs
-        types << LLVM::Float
+        types << context.float
       when RegClass::SSEDs
-        types << LLVM::Double
+        types << context.double
       else
         raise "Unhandled RegClass: #{reg_classes[i]}"
       end
       i += 1
     end
-    Type.struct(types)
+    context.struct(types)
   end
 
   def llvec_len(reg_classes)
@@ -237,7 +237,7 @@ class LLVM::ABI::X86_64 < LLVM::ABI
       if type.packed_struct?
         1
       else
-        type.struct_element_types.inject(1) do |memo, elem|
+        type.struct_element_types.reduce(1) do |memo, elem|
           Math.max(memo, align(elem))
         end
       end
@@ -260,17 +260,17 @@ class LLVM::ABI::X86_64 < LLVM::ABI
       8
     when Type::Kind::Struct
       if type.packed_struct?
-        type.struct_element_types.inject(0) do |memo, elem|
+        type.struct_element_types.reduce(0) do |memo, elem|
           memo + size(elem)
         end
       else
-        size = type.struct_element_types.inject(0) do |memo, elem|
+        size = type.struct_element_types.reduce(0) do |memo, elem|
           align(memo, elem) + size(elem)
         end
         align(size, type)
       end
     when Type::Kind::Array
-      size(type.element_type) * type.array_length
+      size(type.element_type) * type.array_size
     else
       raise "Unhandled Type::Kind in size: #{type.kind}"
     end
@@ -297,7 +297,7 @@ class LLVM::ABI::X86_64 < LLVM::ABI
 
     def sse?
       case self
-      when SSEFs, SSEFv, SSEDs, SSEDs
+      when SSEFs, SSEFv, SSEDs
         true
       else
         false

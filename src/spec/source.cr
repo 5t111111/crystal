@@ -14,9 +14,10 @@ module Spec
 
   # :nodoc:
   def self.relative_file(file)
-    cwd = Dir.working_directory
+    cwd = Dir.current
     if file.starts_with?(cwd)
-      file = ".#{file[cwd.length .. -1]}"
+      file = file[cwd.size..-1]
+      file = file[1..-1] if file.starts_with?('/')
     end
     file
   end

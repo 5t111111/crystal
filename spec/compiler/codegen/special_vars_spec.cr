@@ -81,7 +81,7 @@ describe "Codegen: special vars" do
       class Foo
         getter string
 
-        def initialize(@string)
+        def initialize(@string : String)
         end
       end
 
@@ -209,5 +209,73 @@ describe "Codegen: special vars" do
 
       foo
       )).to_string.should eq("yes")
+  end
+
+  it "allows with primitive" do
+    run(%(
+      class Object; def not_nil!; self; end; end
+
+      def foo
+        $~ = 123
+      end
+
+      foo
+
+      v = $~
+      v || 456
+    )).to_i.should eq(123)
+  end
+
+  it "allows with struct" do
+    run(%(
+      class Object; def not_nil!; self; end; end
+
+      struct Foo
+        def initialize(@x : Int32)
+        end
+
+        def x
+          @x
+        end
+      end
+
+      def foo
+        $~ = Foo.new(123)
+      end
+
+      foo
+
+      v = $~
+      if v
+        v.x
+      else
+        456
+      end
+    )).to_i.should eq(123)
+  end
+
+  it "preserves special vars if initialized inside block (#2194)" do
+    run(%(
+      class Object; def not_nil!; self; end; end
+
+      def foo
+        $~ = "foo"
+      end
+
+      def bar
+        yield
+      end
+
+      bar do
+        foo
+      end
+
+      v = $~
+      if v
+        v
+      else
+        "bar"
+      end
+      )).to_string.should eq("foo")
   end
 end

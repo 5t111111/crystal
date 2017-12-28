@@ -1,8 +1,9 @@
+require "csv"
+
 # :nodoc:
 class CSV::Lexer::IOBased < CSV::Lexer
-  def initialize(io)
-    super()
-    @io = io
+  def initialize(@io : IO, separator = DEFAULT_SEPARATOR, quote_char = DEFAULT_QUOTE_CHAR)
+    super(separator, quote_char)
     @current_char = @io.read_char || '\0'
   end
 
@@ -15,13 +16,13 @@ class CSV::Lexer::IOBased < CSV::Lexer
     @buffer.clear
     while true
       case current_char
-      when ','
+      when @separator
         check_last_empty_column
         break
       when '\r', '\n', '\0'
         break
-      when '"'
-        raise "unexpected quote"
+      when @quote_char
+        raise "Unexpected quote"
       else
         @buffer << current_char
         next_char

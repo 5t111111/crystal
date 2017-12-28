@@ -1,6 +1,8 @@
 class Node
-  def initialize(v)
-    @value = v
+  @left : self?
+  @right : self?
+
+  def initialize(@value : Char)
   end
 
   def add(x)
@@ -31,5 +33,5 @@ root = Node.new('$')
   root.add c
 end
 
-root.print #=> !$accklorrssty
+root.print # => !$accklorrssty
 puts

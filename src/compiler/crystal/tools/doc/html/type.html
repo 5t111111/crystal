@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta id="repository-name" content="<%= type.repository_name %>">
@@ -55,7 +55,7 @@
   <h2>Defined in:</h2>
   <% locations.each do |location| %>
     <% if url = location.url %>
-      <a href="<%= url %>" target="_blank"><%= location.filename %></a>
+      <a href="<%= url %>#L<%= location.line_number %>" target="_blank"><%= location.filename %></a>
     <% else %>
       <%= location.filename %>
     <% end %>
@@ -71,7 +71,7 @@
   <% end %>
   <dl>
     <% type.constants.each do |const| %>
-      <dt class="entry-const">
+      <dt class="entry-const" id="<%= const.name %>">
         <strong><%= const.name %></strong> = <code><%= const.formatted_value %></code>
       </dt>
       <% if doc = const.formatted_doc %>
@@ -83,16 +83,20 @@
   </dl>
 <% end %>
 
+<%= MethodSummaryTemplate.new("Constructors", type.constructors) %>
 <%= MethodSummaryTemplate.new(type.program? ? "Method Summary" : "Class Method Summary", type.class_methods) %>
 <%= MethodSummaryTemplate.new("Instance Method Summary", type.instance_methods) %>
 <%= MethodSummaryTemplate.new("Macro Summary", type.macros) %>
 
 <div class="methods-inherited">
   <% type.ancestors.each do |ancestor| %>
-    <%= MethodsInheritedTemplate.new(type, ancestor) %>
+    <%= MethodsInheritedTemplate.new(type, ancestor, ancestor.instance_methods, "Instance") %>
+    <%= MethodsInheritedTemplate.new(type, ancestor, ancestor.constructors, "Constructor") %>
+    <%= MethodsInheritedTemplate.new(type, ancestor, ancestor.class_methods, "Class") %>
   <% end %>
 </div>
 
+<%= MethodDetailTemplate.new("Constructor Detail", type.constructors) %>
 <%= MethodDetailTemplate.new(type.program? ? "Method Detail" : "Class Method Detail", type.class_methods) %>
 <%= MethodDetailTemplate.new("Instance Method Detail", type.instance_methods) %>
 <%= MethodDetailTemplate.new("Macro Detail", type.macros) %>

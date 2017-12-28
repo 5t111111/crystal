@@ -1,14 +1,40 @@
 require "spec"
 
-class ReferenceSpecTestClass
-  def initialize(@x, @y)
+private module ReferenceSpec
+  class TestClass
+    @x : Int32
+    @y : String
+
+    def initialize(@x, @y)
+    end
   end
-end
 
-class ReferenceSpecTestClassBase
-end
+  class TestClassBase
+  end
 
-class ReferenceSpecTestClassSubclass < ReferenceSpecTestClassBase
+  class TestClassSubclass < TestClassBase
+  end
+
+  class DupCloneClass
+    getter x, y
+
+    def initialize
+      @x = 1
+      @y = [1, 2, 3]
+    end
+
+    def_clone
+  end
+
+  abstract class Abstract
+  end
+
+  class Concrete < Abstract
+    property x
+
+    def initialize(@x : Int32)
+    end
+  end
 end
 
 describe "Reference" do
@@ -29,13 +55,13 @@ describe "Reference" do
   end
 
   it "does inspect" do
-    r = ReferenceSpecTestClass.new(1, "hello")
-    r.inspect.should eq(%(#<ReferenceSpecTestClass:0x#{r.object_id.to_s(16)} @x=1, @y="hello">))
+    r = ReferenceSpec::TestClass.new(1, "hello")
+    r.inspect.should eq(%(#<ReferenceSpec::TestClass:0x#{r.object_id.to_s(16)} @x=1, @y="hello">))
   end
 
   it "does to_s" do
-    r = ReferenceSpecTestClass.new(1, "hello")
-    r.to_s.should eq(%(#<ReferenceSpecTestClass:0x#{r.object_id.to_s(16)}>))
+    r = ReferenceSpec::TestClass.new(1, "hello")
+    r.to_s.should eq(%(#<ReferenceSpec::TestClass:0x#{r.object_id.to_s(16)}>))
   end
 
   it "does inspect for class" do
@@ -47,11 +73,41 @@ describe "Reference" do
   end
 
   it "does to_s for class if virtual" do
-    [ReferenceSpecTestClassBase, ReferenceSpecTestClassSubclass].to_s.should eq("[ReferenceSpecTestClassBase, ReferenceSpecTestClassSubclass]")
+    [ReferenceSpec::TestClassBase, ReferenceSpec::TestClassSubclass].to_s.should eq("[ReferenceSpec::TestClassBase, ReferenceSpec::TestClassSubclass]")
   end
 
   it "returns itself" do
     x = "hello"
     x.itself.should be(x)
+  end
+
+  it "dups" do
+    original = ReferenceSpec::DupCloneClass.new
+    duplicate = original.dup
+    duplicate.should_not be(original)
+    duplicate.x.should eq(original.x)
+    duplicate.y.should be(original.y)
+  end
+
+  it "can dup class that inherits abstract class" do
+    original = ReferenceSpec::Concrete.new(2).as(ReferenceSpec::Abstract)
+    duplicate = original.dup
+    duplicate.should be_a(ReferenceSpec::Concrete)
+    duplicate.should_not be(original)
+    duplicate.x.should eq(original.x)
+  end
+
+  it "clones with def_clone" do
+    original = ReferenceSpec::DupCloneClass.new
+    clone = original.clone
+    clone.should_not be(original)
+    clone.x.should eq(original.x)
+    clone.y.should_not be(original.y)
+    clone.y.should eq(original.y)
+  end
+
+  it "pretty_print" do
+    ReferenceSpec::TestClassBase.new.pretty_inspect.should match(/\A#<ReferenceSpec::TestClassBase:0x[0-9a-f]+>\Z/)
+    ReferenceSpec::TestClass.new(42, "foo").pretty_inspect.should match(/\A#<ReferenceSpec::TestClass:0x[0-9a-f]+ @x=42, @y="foo">\Z/)
   end
 end

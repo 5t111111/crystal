@@ -1,32 +1,48 @@
-class Mutex
-  def initialize
-    LibPThread.mutex_init(out @mutex, nil)
-  end
+require "c/pthread"
 
-  def lock
-    LibPThread.mutex_lock(self)
-  end
+# :nodoc:
+class Thread
+  # :nodoc:
+  class Mutex
+    def initialize
+      if LibC.pthread_mutex_init(out @mutex, nil) != 0
+        raise Errno.new("pthread_mutex_init")
+      end
+    end
 
-  def try_lock
-    LibPThread.mutex_trylock(self)
-  end
+    def lock
+      if LibC.pthread_mutex_lock(self) != 0
+        raise Errno.new("pthread_mutex_lock")
+      end
+    end
 
-  def unlock
-    LibPThread.mutex_unlock(self)
-  end
+    def try_lock
+      if LibC.pthread_mutex_trylock(self) != 0
+        raise Errno.new("pthread_mutex_trylock")
+      end
+    end
 
-  def synchronize
-    lock
-    yield self
-  ensure
-    unlock
-  end
+    def unlock
+      if LibC.pthread_mutex_unlock(self) != 0
+        raise Errno.new("pthread_mutex_unlock")
+      end
+    end
 
-  def destroy
-    LibPThread.mutex_destroy(self)
-  end
+    def synchronize
+      lock
+      yield self
+    ensure
+      unlock
+    end
 
-  def to_unsafe
-    pointerof(@mutex)
+    def finalize
+      if LibC.pthread_mutex_destroy(self) != 0
+        raise Errno.new("pthread_mutex_destroy")
+      end
+    end
+
+    def to_unsafe
+      pointerof(@mutex)
+    end
   end
 end

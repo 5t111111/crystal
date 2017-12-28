@@ -1,10 +1,6 @@
-require "spec"
-require "yaml"
-require "../../../../src/compiler/crystal/**"
+require "../../../spec_helper"
 
-include Crystal
-
-def processed_context_visitor(code, cursor_location)
+private def processed_context_visitor(code, cursor_location)
   compiler = Compiler.new
   compiler.no_codegen = true
   result = compiler.compile(Compiler::Source.new(".", code), "fake-no-build")
@@ -15,12 +11,12 @@ def processed_context_visitor(code, cursor_location)
   {visitor, process_result}
 end
 
-def run_context_tool(code)
+private def run_context_tool(code)
   cursor_location = nil
 
   code.lines.each_with_index do |line, line_number_0|
     if column_number = line.index('‸')
-      cursor_location = Location.new(line_number_0+1, column_number+1, ".")
+      cursor_location = Location.new(".", line_number_0 + 1, column_number + 1)
     end
   end
 
@@ -35,7 +31,7 @@ def run_context_tool(code)
   end
 end
 
-def assert_context_keys(code, *variables)
+private def assert_context_keys(code, *variables)
   run_context_tool(code) do |result|
     result.contexts.should_not be_nil
     result.contexts.not_nil!.each do |context|
@@ -44,7 +40,7 @@ def assert_context_keys(code, *variables)
   end
 end
 
-def assert_context_includes(code, variable, var_types)
+private def assert_context_includes(code, variable, var_types)
   run_context_tool(code) do |result|
     result.contexts.should_not be_nil
     result.contexts.not_nil!.map { |h| h[variable].to_s }.should eq(var_types)
@@ -196,7 +192,7 @@ describe "context" do
     end
     ‸
     0
-    ), "a", ["(String | Int64)"]
+    ), "a", ["(Int64 | String)"]
   end
 
   it "can display text output" do
@@ -215,7 +211,7 @@ describe "context" do
 
 | Expr | Type           |
 -------------------------
-| a    | String | Int64 |
+| a    | Int64 | String |
 )
     end
   end
@@ -232,7 +228,7 @@ describe "context" do
     )) do |result|
       String::Builder.build do |io|
         result.to_json(io)
-      end.should eq %({"status":"ok","message":"1 possible context found","contexts":[{"a":"String | Int64"}]})
+      end.should eq %({"status":"ok","message":"1 possible context found","contexts":[{"a":"Int64 | String"}]})
     end
   end
 
@@ -319,7 +315,7 @@ describe "context" do
   it "can get context inside initialize" do
     assert_context_keys %(
     class Bar
-      def initialize(@ivar)
+      def initialize(@ivar : String)
         ‸
       end
     end
@@ -388,5 +384,38 @@ describe "context" do
 
     foo(1 < 0 ? nil : "s")
     ), "c", ["String"]
+  end
+
+  it "can get context in file private method" do
+    assert_context_keys %(
+    private def foo(a)
+      ‸
+    end
+
+    foo 100
+    ), "a"
+  end
+
+  it "can get context in file private module" do
+    assert_context_keys %(
+    private module Foo
+      def self.foo(a)
+        ‸
+      end
+    end
+
+    Foo.foo 100
+    ), "self", "a"
+  end
+
+  it "can't get context from uncalled method" do
+    run_context_tool %(
+    def foo(value)
+      ‸
+    end
+    ) do |result|
+      result.status.should eq("failed")
+      result.message.should match(/never called/)
+    end
   end
 end

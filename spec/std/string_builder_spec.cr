@@ -7,7 +7,7 @@ describe String::Builder do
       builder << 456
     end
     str.should eq("123456")
-    str.length.should eq(6)
+    str.size.should eq(6)
     str.bytesize.should eq(6)
   end
 
@@ -16,6 +16,22 @@ describe String::Builder do
     builder << 123
     builder.to_s.should eq("123")
 
-    expect_raises { builder.to_s }
+    expect_raises(Exception, "Can only invoke 'to_s' once on String::Builder") { builder.to_s }
+  end
+
+  it "goes back" do
+    s = String::Builder.build do |str|
+      str << 12
+      str.back(1)
+    end
+    s.should eq("1")
+  end
+
+  it "goes back all" do
+    s = String::Builder.build do |str|
+      str << 12
+      str.back(2)
+    end
+    s.should eq("")
   end
 end

@@ -7,17 +7,22 @@ struct LLVM::Target
     end
   end
 
-  def self.first
-    Target.new LibLLVM.get_first_target
+  def self.first : self
+    first? || raise "No LLVM targets available (did you forget to invoke LLVM.init_x86?)"
   end
 
-  def self.from_triple(triple)
+  def self.first? : self?
+    target = LibLLVM.get_first_target
+    target ? Target.new(target) : nil
+  end
+
+  def self.from_triple(triple) : self
     return_code = LibLLVM.get_target_from_triple triple, out target, out error
-    raise String.new(error) unless return_code == 0
+    raise ArgumentError.new(LLVM.string_and_dispose(error)) unless return_code == 0
     new target
   end
 
-  def initialize(@unwrap)
+  def initialize(@unwrap : LibLLVM::TargetRef)
   end
 
   def name
@@ -29,17 +34,23 @@ struct LLVM::Target
   end
 
   def create_target_machine(triple, cpu = "", features = "",
-      opt_level = LLVM::CodeGenOptLevel::Default,
-      reloc = LLVM::RelocMode::PIC,
-      code_model = LLVM::CodeModel::Default)
+                            opt_level = LLVM::CodeGenOptLevel::Default,
+                            reloc = LLVM::RelocMode::PIC,
+                            code_model = LLVM::CodeModel::Default)
     target_machine = LibLLVM.create_target_machine(self, triple, cpu, features, opt_level, reloc, code_model)
     target_machine ? TargetMachine.new(target_machine) : raise "Couldn't create target machine"
   end
 
   def to_s(io)
-    io << name
-    io << " - "
-    io << description
+    io << "LLVM::Target(name="
+    name.inspect(io)
+    io << ", description="
+    description.inspect(io)
+    io << ")"
+  end
+
+  def inspect(io)
+    to_s(io)
   end
 
   def to_unsafe

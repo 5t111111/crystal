@@ -1,4 +1,4 @@
-# The Nil type has only one possible value: `nil`.
+# The `Nil` type has only one possible value: `nil`.
 #
 # `nil` is commonly used to represent the absence of a value.
 # For example, `String#index` returns the position of the character or `nil` if it's not
@@ -6,8 +6,8 @@
 #
 # ```
 # str = "Hello world"
-# str.index 'e' #=> 1
-# str.index 'a' #=> nil
+# str.index 'e' # => 1
+# str.index 'a' # => nil
 # ```
 #
 # In the above example, trying to invoke a method on the returned value will
@@ -19,7 +19,7 @@
 # idx + 1 # Error: undefined method '+' for Nil
 # ```
 #
-# The language and the standard library provide short, readable, easy ways to deal with nil,
+# The language and the standard library provide short, readable, easy ways to deal with `nil`,
 # such as `Object#try` and `Object#not_nil!`:
 #
 # ```
@@ -40,9 +40,9 @@
 # idx3 = str.index('o').not_nil!
 # ```
 struct Nil
-  # Returns `0_u64`. Even though Nil is not a Reference type, it is usually
+  # Returns `0_u64`. Even though `Nil` is not a `Reference` type, it is usually
   # mixed with them to form nilable types so it's useful to have an
-  # object id for nil.
+  # object id for `nil`.
   def object_id
     0_u64
   end
@@ -52,34 +52,24 @@ struct Nil
     0
   end
 
-  # Returns true: Nil has only one singleton value: `nil`.
+  # Returns `true`: `Nil` has only one singleton value: `nil`.
   def ==(other : Nil)
     true
   end
 
-  # Returns true: Nil has only one singleton value: `nil`.
+  # Returns `true`: `Nil` has only one singleton value: `nil`.
   def same?(other : Nil)
     true
   end
 
-  # Returns false.
+  # Returns `false`.
   def same?(other : Reference)
     false
   end
 
-  # Returns true.
-  def nil?
-    true
-  end
-
-  # Returns true.
-  def !
-    true
-  end
-
-  # Returns zero.
-  def hash
-    0
+  # See `Object#hash(hasher)`
+  def hash(hasher)
+    hasher.nil
   end
 
   # Returns an empty string.
@@ -87,7 +77,7 @@ struct Nil
     ""
   end
 
-  # Doesn't write anything to the given IO.
+  # Doesn't write anything to the given `IO`.
   def to_s(io : IO)
     # Nothing to do
   end
@@ -97,18 +87,26 @@ struct Nil
     "nil"
   end
 
-  # Writes `"nil"` to the given IO.
+  # Writes `"nil"` to the given `IO`.
   def inspect(io)
     io << "nil"
   end
 
-  # Doesn't yields to the block. See `Object#try`.
+  # Doesn't yield to the block.
+  #
+  # See also: `Object#try`.
   def try(&block)
     self
   end
 
-  # Raises an exception. See `Object#not_nil!`.
+  # Raises an exception.
+  #
+  # See also: `Object#not_nil!`.
   def not_nil!
     raise "Nil assertion failed"
+  end
+
+  def clone
+    self
   end
 end

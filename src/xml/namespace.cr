@@ -1,12 +1,11 @@
 struct XML::Namespace
-  getter document
+  getter document : Node
 
   def initialize(@document : Node, @ns : LibXML::NS*)
   end
 
-  def hash
-    object_id
-  end
+  # See `Object#hash(hasher)`
+  def_hash object_id
 
   def href
     @ns.value.href ? String.new(@ns.value.href) : nil

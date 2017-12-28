@@ -1,14 +1,14 @@
 require "./sdl/sdl"
 
 class Point
-  MAX_LIFE = 50
+  MAX_LIFE  = 50
   HALF_LIFE = MAX_LIFE / 2
 
-  property :x
-  property :y
-  property :angle
-  property :speed
-  property :color_pattern
+  property x : Float64
+  property y : Float64
+  property angle : Float64
+  property speed : Float64
+  property color_pattern : ColorPattern
   getter :life
 
   def initialize(x, y, angle, speed, color_pattern)
@@ -63,9 +63,11 @@ class Point
 end
 
 class MainPoint < Point
-  COUNT = 4
+  COUNT          = 4
   MAX_TAIL_ANGLE = Math::PI / 3
-  TAIL_SPEED = 0.05
+  TAIL_SPEED     = 0.05
+
+  @tail_angle : Float64
 
   def initialize(x, y, angle, speed, color_pattern)
     super
@@ -180,15 +182,14 @@ class MagentaColorPattern < ColorPattern
 end
 
 class RainbowColorPattern < ColorPattern
-  def initialize(patterns)
-    @patterns = patterns
+  def initialize(@patterns : Array(ColorPattern))
     @index = 0.0
   end
 
   def main
     main = @patterns[@index.to_i].main
     @index += 0.05
-    @index = 0.0 if @index.to_i >= @patterns.length
+    @index = 0.0 if @index.to_i >= @patterns.size
     main
   end
 
@@ -221,7 +222,7 @@ class Points
       end
     end
 
-    if @points.length < MAX
+    if @points.size < MAX
       @points << Point.new(x, y, angle, speed, color_pattern)
     end
   end
@@ -233,12 +234,7 @@ class Points
   end
 end
 
-class Rectangle
-  def initialize(x, y)
-    @x = x
-    @y = y
-  end
-
+record Rectangle, x : Int32, y : Int32 do
   def contains?(p)
     contains? p.x, p.y
   end
@@ -269,9 +265,10 @@ def parse_rectangles(filename)
 end
 
 class Screen
-  def initialize(surface)
-    @surface = surface
-    @background = Array.new(surface.width * surface.height, 0_u32)
+  @rects : Array(Rectangle)
+
+  def initialize(@surface : SDL::Surface)
+    @background = Array(UInt32).new(surface.width * surface.height, 0_u32)
     @rects = parse_rectangles("#{__DIR__}/fire.txt")
   end
 
@@ -319,7 +316,7 @@ end
 
 width = 640
 height = 480
-point_count = ARGV.length > 0 ? ARGV[0].to_i : 4
+point_count = ARGV.size > 0 ? ARGV[0].to_i : 4
 
 yellow = YellowColorPattern.new
 magenta = MagentaColorPattern.new

@@ -5,52 +5,33 @@ require "../syntax/transformer"
 module Crystal
   class Program
     def normalize(node, inside_exp = false)
-      normalizer = Normalizer.new(self)
-      normalizer.exp_nest = 1 if inside_exp
-      node = normalizer.normalize(node)
-      puts node if ENV["SSA"]? == "1"
-      node
+      node.transform Normalizer.new(self)
     end
   end
 
   class Normalizer < Transformer
-    getter program
-    property exp_nest
+    getter program : Program
+
+    @dead_code : Bool
+    @current_def : Def?
 
     def initialize(@program)
       @dead_code = false
       @current_def = nil
-      @exp_nest = 0
-    end
-
-    def normalize(node)
-      node.transform(self)
     end
 
     def before_transform(node)
       @dead_code = false
-      @exp_nest += 1 if nesting_exp?(node)
     end
 
     def after_transform(node)
-      @exp_nest -= 1 if nesting_exp?(node)
-
       case node
       when Return, Break, Next
         @dead_code = true
-      when If, Unless, Expressions, Block
-       # Skip
+      when If, Unless, Expressions, Block, Assign
+        # Skip
       else
         @dead_code = false
-      end
-    end
-
-    def nesting_exp?(node)
-      case node
-      when Expressions, VisibilityModifier, MacroFor, MacroIf, MacroExpression, Require, IfDef
-        false
-      else
-        true
       end
     end
 
@@ -67,94 +48,12 @@ module Crystal
         end
         break if @dead_code
       end
-      case exps.length
+      case exps.size
       when 0
         Nop.new
-      when 1
-        exps[0]
       else
         node.expressions = exps
         node
-      end
-    end
-
-    # Transform a multi assign into many assigns.
-    def transform(node : MultiAssign)
-      # From:
-      #
-      #     a, b = [1, 2]
-      #
-      #
-      # To:
-      #
-      #     temp = [1, 2]
-      #     a = temp[0]
-      #     b = temp[1]
-      if node.values.length == 1
-        value = node.values[0]
-
-        temp_var = new_temp_var
-
-        assigns = Array(ASTNode).new(node.targets.length + 1)
-        assigns << Assign.new(temp_var.clone, value).at(value)
-        node.targets.each_with_index do |target, i|
-          call = Call.new(temp_var.clone, "[]", NumberLiteral.new(i)).at(value)
-          assigns << transform_multi_assign_target(target, call)
-        end
-        exps = Expressions.new(assigns)
-
-      # From:
-      #
-      #     a = 1, 2, 3
-      #
-      # To:
-      #
-      #     a = [1, 2, 3]
-      elsif node.targets.length == 1
-        target = node.targets.first
-        array = ArrayLiteral.new(node.values)
-        exps = transform_multi_assign_target(target, array)
-
-      # From:
-      #
-      #     a, b = c, d
-      #
-      # To:
-      #
-      #     temp1 = c
-      #     temp2 = d
-      #     a = temp1
-      #     b = temp2
-      else
-        temp_vars = node.values.map { new_temp_var }
-
-        assign_to_temps = [] of ASTNode
-        assign_from_temps = [] of ASTNode
-
-        temp_vars.each_with_index do |temp_var_2, i|
-          target = node.targets[i]
-          value = node.values[i]
-          if target.is_a?(Path)
-            assign_from_temps << Assign.new(target, value).at(node)
-          else
-            assign_to_temps << Assign.new(temp_var_2.clone, value).at(node)
-            assign_from_temps << transform_multi_assign_target(target, temp_var_2.clone)
-          end
-        end
-
-        exps = Expressions.new(assign_to_temps + assign_from_temps)
-      end
-      exps.location = node.location
-      exps.transform(self)
-    end
-
-    def transform_multi_assign_target(target, value)
-      if target.is_a?(Call)
-        target.name = "#{target.name}="
-        target.args << value
-        target
-      else
-        Assign.new(target, value).at(target)
       end
     end
 
@@ -162,7 +61,7 @@ module Crystal
       # Copy enclosing def's args to super/previous_def without parenthesis
       case node.name
       when "super", "previous_def"
-        if node.args.empty? && !node.has_parenthesis
+        if node.args.empty? && !node.has_parentheses?
           if current_def = @current_def
             current_def.args.each_with_index do |arg, i|
               arg = Var.new(arg.name)
@@ -170,7 +69,7 @@ module Crystal
               node.args.push arg
             end
           end
-          node.has_parenthesis = true
+          node.has_parentheses = true
         end
       end
 
@@ -180,12 +79,12 @@ module Crystal
         when NumberLiteral, Var, InstanceVar
           transform_many node.args
           left = obj
-          right = Call.new(middle, node.name, node.args)
+          right = Call.new(middle.clone, node.name, node.args).at(middle)
         else
-          temp_var = new_temp_var
+          temp_var = program.new_temp_var
           temp_assign = Assign.new(temp_var.clone, middle)
-          left = Call.new(obj.obj, obj.name, temp_assign)
-          right = Call.new(temp_var.clone, node.name, node.args)
+          left = Call.new(obj.obj, obj.name, temp_assign).at(obj.obj)
+          right = Call.new(temp_var.clone, node.name, node.args).at(node)
         end
         node = And.new(left, right)
         node = node.transform self
@@ -214,9 +113,11 @@ module Crystal
       # and it doesn't use it, we remove it because it's useless
       # and the semantic code won't have to bother checking it
       block_arg = node.block_arg
-      if !node.uses_block_arg && block_arg
-        block_arg_fun = block_arg.fun
-        if block_arg_fun.is_a?(Fun) && !block_arg_fun.inputs && !block_arg_fun.output
+      if !node.uses_block_arg? && block_arg
+        block_arg_restriction = block_arg.restriction
+        if block_arg_restriction.is_a?(ProcNotation) && !block_arg_restriction.inputs && !block_arg_restriction.output
+          node.block_arg = nil
+        elsif !block_arg_restriction
           node.block_arg = nil
         end
       end
@@ -237,7 +138,7 @@ module Crystal
       node.else = node.else.transform(self)
       else_dead_code = @dead_code
 
-      @dead_code = then_dead_code &&  else_dead_code
+      @dead_code = then_dead_code && else_dead_code
       node
     end
 
@@ -277,53 +178,202 @@ module Crystal
     #    end
     def transform(node : Until)
       node = super
-      not_exp = Call.new(node.cond, "!").at(node.cond)
+      not_exp = Not.new(node.cond).at(node.cond)
       While.new(not_exp, node.body).at(node)
     end
 
-    # Evaluate the ifdef's flags.
-    # If they hold, keep the "then" part.
-    # If they don't, keep the "else" part.
-    def transform(node : IfDef)
-      cond_value = program.eval_flags(node.cond)
-      if cond_value
-        node.then.transform(self)
+    # Check if the right hand side is dead code
+    def transform(node : Assign)
+      super
+
+      if @dead_code
+        node.value
       else
-        node.else.transform(self)
+        node
       end
     end
 
-    # Transform require to its source code.
-    # The source code can be a Nop if the file was already required.
-    def transform(node : Require)
-      if @exp_nest > 0
-        node.raise "can't require dynamically"
-      end
+    # Convert `a += b` to `a = a + b`
+    def transform(node : OpAssign)
+      super
 
-      location = node.location
-      filenames = @program.find_in_path(node.string, location.try &.filename)
-      if filenames
-        nodes = Array(ASTNode).new(filenames.length)
-        filenames.each do |filename|
-          if @program.add_to_requires(filename)
-            parser = Parser.new File.read(filename)
-            parser.filename = filename
-            parser.wants_doc = @program.wants_doc?
-            nodes << parser.parse.transform(self)
-          end
+      target = node.target
+      if target.is_a?(Call)
+        if target.name == "[]"
+          transform_op_assign_index(node, target)
+        else
+          transform_op_assign_call(node, target)
         end
-        Expressions.from(nodes)
       else
-        Nop.new
+        transform_op_assign_simple(node, target)
       end
-    rescue ex : Crystal::Exception
-      node.raise "while requiring \"#{node.string}\"", ex
-    rescue ex
-      node.raise "while requiring \"#{node.string}\": #{ex.message}"
     end
 
-    def new_temp_var
-      program.new_temp_var
+    def transform_op_assign_call(node, target)
+      obj = target.obj.not_nil!
+
+      # Convert
+      #
+      #     a.exp += b
+      #
+      # To
+      #
+      #     tmp = a
+      #     tmp.exp=(tmp.exp + b)
+      case obj
+      when Var, InstanceVar, ClassVar, .simple_literal?
+        tmp = obj
+      else
+        tmp = program.new_temp_var
+
+        # (1) = tmp = a
+        assign = Assign.new(tmp, obj).at(node)
+      end
+
+      # (2) = tmp.exp
+      call = Call.new(tmp.clone, target.name).at(node)
+
+      case node.op
+      when "||"
+        # Special: tmp.exp || tmp.exp=(b)
+        #
+        # (3) = tmp.exp=(b)
+        right = Call.new(tmp.clone, "#{target.name}=", node.value).at(node)
+
+        # (4) = (2) || (3)
+        call = Or.new(call, right).at(node)
+      when "&&"
+        # Special: tmp.exp && tmp.exp=(b)
+        #
+        # (3) = tmp.exp=(b)
+        right = Call.new(tmp.clone, "#{target.name}=", node.value).at(node)
+
+        # (4) = (2) && (3)
+        call = And.new(call, right).at(node)
+      else
+        # (3) = (2) + b
+        call = Call.new(call, node.op, node.value).at(node)
+
+        # (4) = tmp.exp=((3))
+        call = Call.new(tmp.clone, "#{target.name}=", call).at(node)
+      end
+
+      # (1); (4)
+      if assign
+        Expressions.new([assign, call]).at(node)
+      else
+        call
+      end
+    end
+
+    def transform_op_assign_index(node, target)
+      obj = target.obj.not_nil!
+
+      # Convert
+      #
+      #     a[exp1, exp2, ...] += b
+      #
+      # To
+      #
+      #     tmp = a
+      #     tmp1 = exp1
+      #     tmp2 = exp2
+      #     ...
+      #     tmp.[]=(tmp1, tmp2, ..., tmp[tmp1, tmp2, ...] + b)
+      tmp_args = target.args.map { program.new_temp_var.as(ASTNode) }
+      tmp = program.new_temp_var
+
+      # (1) = tmp1 = exp1; tmp2 = exp2; ...; tmp = a
+      tmp_assigns = Array(ASTNode).new(tmp_args.size + 1)
+      tmp_args.each_with_index do |var, i|
+        # For simple literals we don't need a temp variable
+        arg = target.args[i]
+        if arg.simple_literal?
+          tmp_args[i] = arg
+        else
+          tmp_assigns << Assign.new(var.clone, arg).at(node)
+        end
+      end
+
+      case obj
+      when Var, InstanceVar, ClassVar, .simple_literal?
+        # Nothing
+        tmp = obj
+      else
+        tmp_assigns << Assign.new(tmp, obj).at(node)
+      end
+
+      case node.op
+      when "||"
+        # Special: tmp[tmp1, tmp2, ...]? || (tmp[tmp1, tmp2, ...] = b)
+        #
+        # (2) = tmp[tmp1, tmp2, ...]?
+        call = Call.new(tmp.clone, "[]?", tmp_args).at(node)
+
+        # (3) = tmp[tmp1, tmp2, ...] = b
+        args = Array(ASTNode).new(tmp_args.size + 1)
+        tmp_args.each { |arg| args << arg.clone }
+        args << node.value
+        right = Call.new(tmp.clone, "[]=", args).at(node)
+
+        # (3) = (2) || (4)
+        call = Or.new(call, right).at(node)
+      when "&&"
+        # Special: tmp[tmp1, tmp2, ...]? && (tmp[tmp1, tmp2, ...] = b)
+        #
+        # (2) = tmp[tmp1, tmp2, ...]?
+        call = Call.new(tmp.clone, "[]?", tmp_args).at(node)
+
+        # (3) = tmp[tmp1, tmp2, ...] = b
+        args = Array(ASTNode).new(tmp_args.size + 1)
+        tmp_args.each { |arg| args << arg.clone }
+        args << node.value
+        right = Call.new(tmp.clone, "[]=", args).at(node)
+
+        # (3) = (2) && (4)
+        call = And.new(call, right).at(node)
+      else
+        # (2) = tmp[tmp1, tmp2, ...]
+        call = Call.new(tmp.clone, "[]", tmp_args).at(node)
+
+        # (3) = (2) + b
+        call = Call.new(call, node.op, node.value).at(node)
+
+        # (4) tmp.[]=(tmp1, tmp2, ..., (3))
+        args = Array(ASTNode).new(tmp_args.size + 1)
+        tmp_args.each { |arg| args << arg.clone }
+        args << call
+        call = Call.new(tmp.clone, "[]=", args).at(node)
+      end
+
+      # (1); (4)
+      exps = Array(ASTNode).new(tmp_assigns.size + 2)
+      exps.concat(tmp_assigns)
+      exps << call
+      Expressions.new(exps).at(node)
+    end
+
+    def transform_op_assign_simple(node, target)
+      case node.op
+      when "&&"
+        # (1) a = b
+        assign = Assign.new(target, node.value).at(node)
+
+        # a && (1)
+        And.new(target.clone, assign).at(node)
+      when "||"
+        # (1) a = b
+        assign = Assign.new(target, node.value).at(node)
+
+        # a || (1)
+        Or.new(target.clone, assign).at(node)
+      else
+        # (1) = a + b
+        call = Call.new(target, node.op, node.value).at(node)
+
+        # a = (1)
+        Assign.new(target.clone, call).at(node)
+      end
     end
   end
 end

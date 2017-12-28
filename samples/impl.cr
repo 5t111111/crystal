@@ -1,11 +1,12 @@
-class A
-  property lorem
+class Foo
+  property lorem : Int32?
+
   def foo
     1
   end
 end
 
-class B
+class Bar
   def foo
     2
   end
@@ -21,11 +22,11 @@ def baz(o)
   o.foo
 end
 
-puts bar(A.new)
-puts bar(B.new)
-puts baz(A.new)
+puts bar(Foo.new)
+puts bar(Bar.new)
+puts baz(Foo.new)
 
-A.new.lorem
+Foo.new.lorem
 
 # ./crystal tool implementations samples/impl.cr --cursor samples/impl.cr:16:8
 #

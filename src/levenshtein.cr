@@ -3,44 +3,46 @@ module Levenshtein
   # Computes the [levenshtein distance](http://en.wikipedia.org/wiki/Levenshtein_distance) of two strings.
   #
   # ```
-  # levenshtein("algorithm", "altruistic") #=> 6
-  # levenshtein("hello", "hallo")          #=> 1
-  # levenshtein("こんにちは", "こんちは")    #=> 1
-  # levensthein("hey", "hey")              #=> 0
+  # require "levenshtein"
+  #
+  # Levenshtein.distance("algorithm", "altruistic") # => 6
+  # Levenshtein.distance("hello", "hallo")          # => 1
+  # Levenshtein.distance("こんにちは", "こんちは")           # => 1
+  # Levenshtein.distance("hey", "hey")              # => 0
   # ```
-  def self.distance(string1 : String, string2 : String)
+  def self.distance(string1 : String, string2 : String) : Int32
     return 0 if string1 == string2
 
     s = string1.chars
     t = string2.chars
 
-    s_len = s.length
-    t_len = t.length
+    s_size = s.size
+    t_size = t.size
 
-    return t_len if s_len == 0
-    return s_len if t_len == 0
+    return t_size if s_size == 0
+    return s_size if t_size == 0
 
     # This is to allocate less memory
-    if t_len > s_len
+    if t_size > s_size
       t, s = s, t
-      t_len, s_len = s_len, t_len
+      t_size, s_size = s_size, t_size
     end
 
-    v0 = Pointer(Int32).malloc(t_len + 1) { |i| i }
-    v1 = Pointer(Int32).malloc(t_len + 1)
+    v = Pointer(Int32).malloc(t_size + 1) { |i| i }
 
-    s_len.times do |i|
-      v1[0] = i + 1
+    s_size.times do |i|
+      last_cost = i + 1
 
-      0.upto(t_len - 1) do |j|
-        cost = s[i] == t[j] ? 0 : 1
-        v1[j + 1] = Math.min(Math.min(v1[j] + 1, v0[j + 1] + 1), v0[j] + cost)
+      t_size.times do |j|
+        sub_cost = s[i] == t[j] ? 0 : 1
+        cost = Math.min(Math.min(last_cost + 1, v[j + 1] + 1), v[j] + sub_cost)
+        v[j] = last_cost
+        last_cost = cost
       end
-
-      v0.copy_from(v1, t_len + 1)
+      v[t_size] = last_cost
     end
 
-    v1[t_len]
+    v[t_size]
   end
 
   # Finds the closest string to a given string amongst many strings.
@@ -51,17 +53,21 @@ module Levenshtein
   # finder.test "hall"
   # finder.test "hallo world"
   #
-  # finder.best_match #=> "hall"
+  # finder.best_match # => "hall"
   # ```
   class Finder
     # :nodoc:
-    record Entry, value, distance
+    record Entry,
+      value : String,
+      distance : Int32
 
-    def initialize(@target : String, tolerance = nil : Int?)
-      @tolerance = tolerance || (target.length / 5.0).ceil.to_i
+    @tolerance : Int32
+
+    def initialize(@target : String, tolerance : Int? = nil)
+      @tolerance = tolerance || (target.size / 5.0).ceil.to_i
     end
 
-    def test(name : String, value = name : String)
+    def test(name : String, value : String = name)
       distance = Levenshtein.distance(@target, name)
       if distance <= @tolerance
         if best_entry = @best_entry

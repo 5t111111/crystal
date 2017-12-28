@@ -1,26 +1,24 @@
+require "./node"
+
 struct XML::Attributes
   include Enumerable(Node)
 
-  def initialize(@node)
+  def initialize(@node : Node)
   end
 
   def empty?
     return true unless @node.element?
 
-    props = self.props()
-    props.nil?
-  end
-
-  def length
-    count
+    props = self.props
+    props.null?
   end
 
   def [](index : Int)
-    length = self.length
+    size = self.size
 
-    index += length if index < 0
+    index += size if index < 0
 
-    unless 0 <= index < length
+    unless 0 <= index < size
       raise IndexError.new
     end
 
@@ -39,11 +37,16 @@ struct XML::Attributes
     find { |node| node.name == name }
   end
 
-  def each
+  def []=(name : String, value)
+    LibXML.xmlSetProp(@node, name, value.to_s)
+    value
+  end
+
+  def each : Nil
     return unless @node.element?
 
-    props = self.props()
-    until props.nil?
+    props = self.props
+    until props.null?
       yield Node.new(props)
       props = props.value.next
     end

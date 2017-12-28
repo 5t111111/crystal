@@ -80,4 +80,89 @@ describe "Codegen: while" do
       x
     ").to_i.should eq(25)
   end
+
+  it "doesn't crash on a = NoReturn" do
+    codegen(%(
+      lib LibFoo
+        fun foo : NoReturn
+      end
+
+      while a = LibFoo.foo
+        a
+      end
+      ))
+  end
+
+  it "doesn't crash on #2767" do
+    run(%(
+      lib LibC
+        fun exit(Int32) : NoReturn
+      end
+
+      x = 'x'
+      while 1 == 2
+        if true
+          x = (LibC.exit(0); 1)
+        end
+      end
+      x
+      10
+      )).to_i.should eq(10)
+  end
+
+  it "doesn't crash on #2767 (2)" do
+    run(%(
+      lib LibC
+        fun exit(Int32) : NoReturn
+      end
+
+      x = 'x'
+      while 1 == 2
+        x = LibC.exit(0).as(Int32)
+      end
+      x
+      10
+      )).to_i.should eq(10)
+  end
+
+  it "doesn't crash on #2767 (3)" do
+    run(%(
+      lib LibC
+        fun exit(Int32) : NoReturn
+      end
+
+      x = 'x'
+      while 1 == 2
+        if true
+          x = if true
+            LibC.exit(0)
+          else
+            3
+          end
+        end
+      end
+      x
+      10
+      )).to_i.should eq(10)
+  end
+
+  it "doesn't crash on #2767 (4)" do
+    run(%(
+      lib LibC
+        fun exit(Int32) : NoReturn
+      end
+
+      x = 'x'
+      while 1 == 2
+        if true
+          x = (LibC.exit(0); 1)
+        end
+        y = x
+        z = y
+        x = z
+      end
+      x
+      10
+      )).to_i.should eq(10)
+  end
 end

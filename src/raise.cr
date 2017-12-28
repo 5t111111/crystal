@@ -1,46 +1,10 @@
-lib LibABI
-  struct UnwindException
-    exception_class : LibC::SizeT
-    exception_cleanup : LibC::SizeT
-    private1 : UInt64
-    private2 : UInt64
-    exception_object : UInt64
-    exception_type_id : Int32
-  end
+require "c/stdio"
+require "c/stdlib"
+require "callstack"
 
-  UA_SEARCH_PHASE = 1
-  UA_CLEANUP_PHASE = 2
-  UA_HANDLER_FRAME = 4
-  UA_FORCE_UNWIND = 8
+CallStack.skip(__FILE__)
 
-  URC_NO_REASON = 0
-  URC_FOREIGN_EXCEPTION_CAUGHT = 1
-  URC_FATAL_PHASE2_ERROR = 2
-  URC_FATAL_PHASE1_ERROR = 3
-  URC_NORMAL_STOP = 4
-  URC_END_OF_STACK = 5
-  URC_HANDLER_FOUND = 6
-  URC_INSTALL_CONTEXT = 7
-  URC_CONTINUE_UNWIND = 8
-
-  ifdef x86_64
-    EH_REGISTER_0 = 0
-    EH_REGISTER_1 = 1
-  else
-    EH_REGISTER_0 = 0
-    EH_REGISTER_1 = 2
-  end
-
-  fun unwind_raise_exception = _Unwind_RaiseException(ex : UnwindException*) : Int32
-  fun unwind_get_region_start = _Unwind_GetRegionStart(context : Void*) : LibC::SizeT
-  fun unwind_get_ip = _Unwind_GetIP(context : Void*) : LibC::SizeT
-  fun unwind_set_ip = _Unwind_SetIP(context : Void*, ip : LibC::SizeT) : LibC::SizeT
-  fun unwind_set_gr = _Unwind_SetGR(context : Void*, index : Int32, value : LibC::SizeT)
-  fun unwind_get_language_specific_data = _Unwind_GetLanguageSpecificData(context : Void*) : UInt8*
-end
-
-# :nodoc:
-struct LEBReader
+private struct LEBReader
   def initialize(@data : UInt8*)
   end
 
@@ -55,7 +19,7 @@ struct LEBReader
   end
 
   def read_uint32
-    value = (@data as UInt32*).value
+    value = @data.as(UInt32*).value
     @data += 4
     value
   end
@@ -65,7 +29,7 @@ struct LEBReader
     shift = 0
     while true
       byte = read_uint8
-      result |= ((0x7f_u64 & byte) << shift);
+      result |= ((0x7f_u64 & byte) << shift)
       break if (byte & 0x80_u8) == 0
       shift += 7
     end
@@ -73,78 +37,186 @@ struct LEBReader
   end
 end
 
-# :nodoc:
-fun __crystal_personality(version : Int32, actions : Int32, exception_class : UInt64, exception_object : LibABI::UnwindException*, context : Void*) : Int32
-  start = LibABI.unwind_get_region_start(context)
-  ip = LibABI.unwind_get_ip(context)
-  throw_offset = ip - 1 - start
-  lsd = LibABI.unwind_get_language_specific_data(context)
-  # puts "Personality - actions : #{actions}, start: #{start}, ip: #{ip}, throw_offset: #{throw_offset}"
+{% if flag?(:win32) %}
+  require "callstack/lib_unwind"
 
-  leb = LEBReader.new(lsd)
-  leb.read_uint8 # @LPStart encoding
-  if leb.read_uint8 != 0xff_u8 # @TType encoding
-    leb.read_uleb128 # @TType base offset
+  # Raises the *exception*.
+  #
+  # This will set the exception's callstack if it hasn't been already.
+  # Re-raising a previously catched exception won't replace the callstack.
+  def raise(exception : Exception) : NoReturn
+    exception.inspect_with_backtrace(STDERR)
+    LibC.exit(1)
   end
-  leb.read_uint8 # CS Encoding
-  cs_table_length = leb.read_uleb128 # CS table length
-  cs_table_end = leb.data + cs_table_length
 
-  while leb.data < cs_table_end
-    cs_offset = leb.read_uint32
-    cs_length = leb.read_uint32
-    cs_addr = leb.read_uint32
-    action = leb.read_uleb128
-    # puts "cs_offset: #{cs_offset}, cs_length: #{cs_length}, cs_addr: #{cs_addr}, action: #{action}"
+  fun __crystal_personality(version : Int32, actions : LibUnwind::Action, exception_class : UInt64, exception_object : LibUnwind::Exception*, context : Void*) : LibUnwind::ReasonCode
+    LibUnwind::ReasonCode::NO_REASON
+  end
 
-    if cs_addr != 0
-      if cs_offset <= throw_offset && throw_offset <= cs_offset + cs_length
-        if (actions & LibABI::UA_SEARCH_PHASE) > 0
-          # puts "found"
-          return LibABI::URC_HANDLER_FOUND
-        end
+  # :nodoc:
+  @[Raises]
+  fun __crystal_raise(unwind_ex : LibUnwind::Exception*) : NoReturn
+    LibC.printf("EXITING: __crystal_raise called")
+    LibC.exit(1)
+  end
+{% elsif flag?(:arm) %}
+  # On ARM EHABI the personality routine is responsible for actually
+  # unwinding a single stack frame before returning (ARM EHABI Sec. 6.1).
+  private macro __crystal_continue_unwind
+    if LibUnwind.__gnu_unwind_frame(ucb, context) != LibUnwind::ReasonCode::NO_REASON
+      return LibUnwind::ReasonCode::FAILURE
+    end
+    #puts "continue"
+    return LibUnwind::ReasonCode::CONTINUE_UNWIND
+  end
 
-        if (actions & LibABI::UA_HANDLER_FRAME) > 0
-          LibABI.unwind_set_gr(context, LibABI::EH_REGISTER_0, LibC::SizeT.cast(exception_object.address))
-          LibABI.unwind_set_gr(context, LibABI::EH_REGISTER_1, LibC::SizeT.cast(exception_object.value.exception_type_id))
-          LibABI.unwind_set_ip(context, start + cs_addr)
-          # puts "install"
-          return LibABI::URC_INSTALL_CONTEXT
+  # :nodoc:
+  fun __crystal_personality(state : LibUnwind::State, ucb : LibUnwind::ControlBlock*, context : LibUnwind::Context) : LibUnwind::ReasonCode
+    #puts "\n__crystal_personality(#{state}, #{ucb}, #{context})"
+
+    case LibUnwind::State.new(state.value & LibUnwind::State::ACTION_MASK.value)
+    when LibUnwind::State::VIRTUAL_UNWIND_FRAME
+      if state.force_unwind?
+        __crystal_continue_unwind
+      else
+        actions = LibUnwind::Action::SEARCH_PHASE
+      end
+    when LibUnwind::State::UNWIND_FRAME_STARTING
+      actions = LibUnwind::Action::HANDLER_FRAME
+    when LibUnwind::State::UNWIND_FRAME_RESUME
+      __crystal_continue_unwind
+    else
+      exit(-1)
+    end
+
+    if state.force_unwind?
+      actions |= LibUnwind::Action::FORCE_UNWIND
+    end
+
+    start = __crystal_get_region_start(ucb)
+    lsd = __crystal_get_language_specific_data(ucb)
+
+    ip = __crystal_unwind_get_ip(context)
+    throw_offset = ip - 1 - start
+
+    leb = LEBReader.new(lsd)
+    leb.read_uint8               # @LPStart encoding
+    if leb.read_uint8 != 0xff_u8 # @TType encoding
+      leb.read_uleb128           # @TType base offset
+    end
+    leb.read_uint8                     # CS Encoding
+    cs_table_length = leb.read_uleb128 # CS table length
+    cs_table_end = leb.data + cs_table_length
+
+    while leb.data < cs_table_end
+      cs_offset = leb.read_uint32
+      cs_length = leb.read_uint32
+      cs_addr = leb.read_uint32
+      action = leb.read_uleb128
+      #puts "cs_offset: #{cs_offset}, cs_length: #{cs_length}, cs_addr: #{cs_addr}, action: #{action}"
+
+      if cs_addr != 0
+        if cs_offset <= throw_offset && throw_offset <= cs_offset + cs_length
+          if actions.includes? LibUnwind::Action::SEARCH_PHASE
+            #puts "found"
+            return LibUnwind::ReasonCode::HANDLER_FOUND
+          end
+
+          if actions.includes? LibUnwind::Action::HANDLER_FRAME
+            __crystal_unwind_set_gr(context, LibUnwind::EH_REGISTER_0, ucb.address.to_u32)
+            __crystal_unwind_set_gr(context, LibUnwind::EH_REGISTER_1, ucb.value.exception_type_id.to_u32)
+            __crystal_unwind_set_ip(context, start + cs_addr)
+            #puts "install"
+            return LibUnwind::ReasonCode::INSTALL_CONTEXT
+          end
         end
       end
     end
+
+    __crystal_continue_unwind
   end
+{% else %}
+  # :nodoc:
+  fun __crystal_personality(version : Int32, actions : LibUnwind::Action, exception_class : UInt64, exception_object : LibUnwind::Exception*, context : Void*) : LibUnwind::ReasonCode
+    start = LibUnwind.get_region_start(context)
+    ip = LibUnwind.get_ip(context)
+    throw_offset = ip - 1 - start
+    lsd = LibUnwind.get_language_specific_data(context)
+    #puts "Personality - actions : #{actions}, start: #{start}, ip: #{ip}, throw_offset: #{throw_offset}"
 
-  # puts "continue"
-  return LibABI::URC_CONTINUE_UNWIND
-end
+    leb = LEBReader.new(lsd)
+    leb.read_uint8               # @LPStart encoding
+    if leb.read_uint8 != 0xff_u8 # @TType encoding
+      leb.read_uleb128           # @TType base offset
+    end
+    leb.read_uint8                     # CS Encoding
+    cs_table_length = leb.read_uleb128 # CS table length
+    cs_table_end = leb.data + cs_table_length
+
+    while leb.data < cs_table_end
+      cs_offset = leb.read_uint32
+      cs_length = leb.read_uint32
+      cs_addr = leb.read_uint32
+      action = leb.read_uleb128
+      #puts "cs_offset: #{cs_offset}, cs_length: #{cs_length}, cs_addr: #{cs_addr}, action: #{action}"
+
+      if cs_addr != 0
+        if cs_offset <= throw_offset && throw_offset <= cs_offset + cs_length
+          if actions.includes? LibUnwind::Action::SEARCH_PHASE
+            #puts "found"
+            return LibUnwind::ReasonCode::HANDLER_FOUND
+          end
+
+          if actions.includes? LibUnwind::Action::HANDLER_FRAME
+            LibUnwind.set_gr(context, LibUnwind::EH_REGISTER_0, exception_object.address)
+            LibUnwind.set_gr(context, LibUnwind::EH_REGISTER_1, exception_object.value.exception_type_id)
+            LibUnwind.set_ip(context, start + cs_addr)
+            #puts "install"
+            return LibUnwind::ReasonCode::INSTALL_CONTEXT
+          end
+        end
+      end
+    end
+
+    #puts "continue"
+    return LibUnwind::ReasonCode::CONTINUE_UNWIND
+  end
+{% end %}
+
+{% unless flag?(:win32) %}
+  # :nodoc:
+  @[Raises]
+  fun __crystal_raise(unwind_ex : LibUnwind::Exception*) : NoReturn
+    ret = LibUnwind.raise_exception(unwind_ex)
+    LibC.dprintf 2, "Failed to raise an exception: %s\n", ret.to_s
+    CallStack.print_backtrace
+    LibC.exit(ret)
+  end
+{% end %}
 
 # :nodoc:
-@[Raises]
-fun __crystal_raise(unwind_ex : LibABI::UnwindException*) : NoReturn
-  ret = LibABI.unwind_raise_exception(unwind_ex)
-  LibC.printf "Could not raise"
-  # caller.each do |point|
-    # puts point
-  # end
-  LibC.exit(ret)
-end
-
-# :nodoc:
-fun __crystal_get_exception(unwind_ex : LibABI::UnwindException*) : UInt64
+fun __crystal_get_exception(unwind_ex : LibUnwind::Exception*) : UInt64
   unwind_ex.value.exception_object
 end
 
-def raise(ex : Exception)
-  unwind_ex = Pointer(LibABI::UnwindException).malloc
-  unwind_ex.value.exception_class = LibC::SizeT.zero
-  unwind_ex.value.exception_cleanup = LibC::SizeT.zero
-  unwind_ex.value.exception_object = ex.object_id
-  unwind_ex.value.exception_type_id = ex.crystal_type_id
-  __crystal_raise(unwind_ex)
-end
+{% unless flag?(:win32) %}
+  # Raises the *exception*.
+  #
+  # This will set the exception's callstack if it hasn't been already.
+  # Re-raising a previously catched exception won't replace the callstack.
+  def raise(exception : Exception) : NoReturn
+    exception.callstack ||= CallStack.new
+    unwind_ex = Pointer(LibUnwind::Exception).malloc
+    unwind_ex.value.exception_class = LibC::SizeT.zero
+    unwind_ex.value.exception_cleanup = LibC::SizeT.zero
+    unwind_ex.value.exception_object = exception.object_id
+    unwind_ex.value.exception_type_id = exception.crystal_type_id
+    __crystal_raise(unwind_ex)
+  end
+{% end %}
 
-def raise(message : String)
+# Raises an Exception with the *message*.
+def raise(message : String) : NoReturn
   raise Exception.new(message)
 end
 

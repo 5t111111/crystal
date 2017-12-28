@@ -9,28 +9,27 @@ struct XML::NodeSet
   end
 
   def [](index : Int)
-    index += length if index < 0
+    index += size if index < 0
 
-    unless 0 <= index < length
+    unless 0 <= index < size
       raise IndexError.new
     end
 
     internal_at(index)
   end
 
-  def each
-    length.times do |i|
+  def each : Nil
+    size.times do |i|
       yield internal_at(i)
     end
   end
 
   def empty?
-    length == 0
+    size == 0
   end
 
-  def hash
-    object_id
-  end
+  # See `Object#hash(hasher)`
+  def_hash object_id
 
   def inspect(io)
     io << "["
@@ -38,7 +37,7 @@ struct XML::NodeSet
     io << "]"
   end
 
-  def length
+  def size
     @set.value.node_nr
   end
 

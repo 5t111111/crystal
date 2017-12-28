@@ -4,7 +4,7 @@ class SDL::Surface
   getter :height
   getter :bpp
 
-  def initialize(@surface, @width, @height, @bpp)
+  def initialize(@surface : LibSDL::Surface*, @width : Int32, @height : Int32, @bpp : Int32)
   end
 
   def lock
@@ -24,7 +24,7 @@ class SDL::Surface
   end
 
   def []=(offset, color)
-    (@surface.value.pixels as UInt32*)[offset] = color.to_u32
+    (@surface.value.pixels.as(UInt32*))[offset] = color.to_u32
   end
 
   def []=(x, y, color)

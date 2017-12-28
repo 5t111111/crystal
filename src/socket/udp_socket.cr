@@ -1,6 +1,7 @@
 require "./ip_socket"
 
-# A User Datagram Protocol socket.
+# A User Datagram Protocol (UDP) socket.
+#
 # UDP runs on top of the Internet Protocol (IP) and was developed for applications that do
 # not require reliability, acknowledgement, or flow control features at the transport layer.
 # This simple protocol provides transport layer addressing in the form of UDP ports and an
@@ -11,11 +12,11 @@ require "./ip_socket"
 # beforehand. The UDP socket only needs to be opened for communication. It listens for
 # incoming messages and sends outgoing messages on request.
 #
-# This implementation supports both IPv4 and IPv6 addresses. For IPv4 addresses you need use
-# `Socket::Family::INET` family (used by default). And `Socket::Family::INET6` for IPv6
-# addresses accordingly.
+# This implementation supports both IPv4 and IPv6 addresses. For IPv4 addresses you must use
+# `Socket::Family::INET` family (default) or `Socket::Family::INET6` for IPv6 # addresses.
 #
 # Usage example:
+#
 # ```
 # require "socket"
 #
@@ -27,51 +28,64 @@ require "./ip_socket"
 # client = UDPSocket.new
 # client.connect "localhost", 1234
 #
-# client << "message" # send message to server
-# server.read(7)      # => "message"
+# # Send a text message to server
+# client.send "message"
+#
+# # Receive text message from client
+# message, client_addr = server.receive
 #
 # # Close client and server
 # client.close
 # server.close
 # ```
+#
+# The `send` methods may sporadically fail with `Errno::ECONNREFUSED` when sending datagrams
+# to a non-listening server.
+# Wrap with an exception handler to prevent raising. Example:
+#
+# ```
+# begin
+#   client.send(message, @destination)
+# rescue ex : Errno
+#   if ex.errno == Errno::ECONNREFUSED
+#     p ex.inspect
+#   end
+# end
+# ```
 class UDPSocket < IPSocket
-  def initialize(family = Socket::Family::INET : Socket::Family)
-    super create_socket(family.value, LibC::SOCK_DGRAM, LibC::IPPROTO_UDP)
+  def initialize(family : Family = Family::INET)
+    super(family, Type::DGRAM, Protocol::UDP)
   end
 
-  # Creates a UDP socket from the given address.
+  # Receives a text message from the previously bound address.
+  #
+  # ```
+  # server = UDPSocket.new
+  # server.bind("localhost", 1234)
+  #
+  # message, client_addr = server.receive
+  # ```
+  def receive(max_message_size = 512) : {String, IPAddress}
+    address = nil
+    message = String.new(max_message_size) do |buffer|
+      bytes_read, sockaddr, addrlen = recvfrom(Slice.new(buffer, max_message_size))
+      address = IPAddress.from(sockaddr, addrlen)
+      {bytes_read, 0}
+    end
+    {message, address.not_nil!}
+  end
+
+  # Receives a binary message from the previously bound address.
   #
   # ```
   # server = UDPSocket.new
   # server.bind "localhost", 1234
-  # ```
-  def bind(host, port, dns_timeout = nil)
-    getaddrinfo(host, port, nil, LibC::SOCK_DGRAM, LibC::IPPROTO_UDP, timeout: dns_timeout) do |ai|
-      self.reuse_address = true
-
-      if LibC.bind(fd, ai.addr, ai.addrlen) != 0
-        next false if ai.next
-        raise Errno.new("Error binding UDP socket at #{host}:#{port}")
-      end
-
-      true
-    end
-  end
-
-  # Attempts to connect the socket to a remote address and port for this socket.
   #
+  # message = Bytes.new(32)
+  # bytes_read, client_addr = server.receive(message)
   # ```
-  # client = UDPSocket.new
-  # client.connect "localhost", 1234
-  # ```
-  def connect(host, port, dns_timeout = nil, connect_timeout = nil)
-    getaddrinfo(host, port, nil, LibC::SOCK_DGRAM, LibC::IPPROTO_UDP, timeout: dns_timeout) do |ai|
-      if err = nonblocking_connect host, port, ai, timeout: connect_timeout
-        next false if ai.next
-        raise err
-      end
-
-      true
-    end
+  def receive(message : Bytes) : {Int32, IPAddress}
+    bytes_read, sockaddr, addrlen = recvfrom(message)
+    {bytes_read, IPAddress.from(sockaddr, addrlen)}
   end
 end

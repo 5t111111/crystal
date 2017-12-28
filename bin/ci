@@ -1,0 +1,223 @@
+#!/bin/bash
+
+fail() {
+  echo "${@}" >&2
+  exit 1
+}
+
+on_deploy() {
+  if [ "${TRAVIS_PULL_REQUEST}" = "false" ]; then
+    if [ "${DEPLOY}" = "true" ]; then
+      echo "${@}"
+      eval "${@}"
+      return $?
+    else
+      return 0
+    fi
+  fi
+}
+
+on_tag() {
+  if [ -n "$CURRENT_TAG" ]; then
+    echo "${@}"
+    eval "${@}"
+    return $?
+  else
+    return 0
+  fi
+}
+
+fail_on_error() {
+  "${@}"
+
+  exit=$?
+  if [ "$exit" -ne "0" ]; then
+    fail "${@} exited with $exit"
+  fi
+
+  return 0
+}
+
+verify_environment() {
+  if [ -z "$TRAVIS_OS_NAME" ]; then
+    fail "\$TRAVIS_OS_NAME is not set or empty."
+  fi
+}
+
+verify_linux_environment() {
+  if [ -z "$ARCH" ]; then
+    fail "\$ARCH is not set or empty."
+  fi
+
+  if [ -z "$ARCH_CMD" ]; then
+    fail "\$ARCH_CMD is not set or empty."
+  fi
+}
+
+on_os() {
+  os="$1"
+  shift
+
+  verify_environment
+
+  if [ "$TRAVIS_OS_NAME" = "$os" ]; then
+    echo "${@}"
+    eval "${@}"
+    return $?
+  else
+    return 0
+  fi
+}
+
+on_linux() {
+  fail_on_error on_os "linux" "${@}"
+}
+
+on_osx() {
+  fail_on_error on_os "osx" "${@}"
+}
+
+prepare_system() {
+  on_osx brew update
+  on_deploy sudo pip install awscli
+}
+
+build() {
+  with_build_env 'make std_spec clean'
+  with_build_env 'make crystal std_spec compiler_spec docs'
+  with_build_env 'find samples -name "*.cr" | xargs -L 1 ./bin/crystal build --no-codegen'
+  with_build_env './bin/crystal tool format --check samples spec src'
+}
+
+deploy() {
+  export CURRENT_TAG=`git describe --tags --exact-match 2> /dev/null`
+  export GIT_VERSION=`git describe --tags --long --always 2>/dev/null`
+  on_deploy 'echo $GIT_VERSION > docs/revision.txt'
+
+  on_deploy aws s3 sync docs/ s3://crystal-api/api/$TRAVIS_BRANCH
+
+  on_deploy on_tag aws s3 sync docs/ s3://crystal-api/api/$CURRENT_TAG
+  cat - > .aws-config <<EOF
+    {
+      "IndexDocument": {
+        "Suffix": "index.html"
+      },
+      "RoutingRules": [
+        {
+          "Condition": {
+            "KeyPrefixEquals": "api/latest/${CURRENT_TAG}/"
+          },
+          "Redirect": {
+            "HttpRedirectCode": "302",
+            "ReplaceKeyWith": "404",
+            "Protocol": "https",
+            "HostName": "crystal-lang.org"
+          }
+        },
+        {
+          "Condition": {
+            "KeyPrefixEquals": "api/latest/"
+          },
+          "Redirect": {
+            "HttpRedirectCode": "302",
+            "ReplaceKeyPrefixWith": "api/${CURRENT_TAG}/",
+            "Protocol": "https",
+            "HostName": "crystal-lang.org"
+          }
+        },
+        {
+          "Condition": {
+            "KeyPrefixEquals": "api/",
+            "HttpErrorCodeReturnedEquals": "404"
+          },
+          "Redirect": {
+            "HttpRedirectCode": "301",
+            "ReplaceKeyPrefixWith": "api/latest/",
+            "Protocol": "https",
+            "HostName": "crystal-lang.org"
+          }
+        }
+      ]
+    }
+EOF
+  on_deploy on_tag cat .aws-config
+  on_deploy on_tag aws s3api put-bucket-website --bucket crystal-api --website-configuration file://.aws-config
+}
+
+prepare_build() {
+  on_linux verify_linux_environment
+
+  on_linux docker pull "jhass/crystal-build-$ARCH"
+
+  on_osx brew install llvm crystal-lang
+}
+
+with_build_env() {
+  command="$1"
+
+  # Ensure non GMT timezone
+  export TZ="America/New_York"
+
+  on_linux verify_linux_environment
+  on_linux docker run \
+    --rm -t \
+    -u $(id -u) \
+    -v $(pwd):/mnt \
+    -w /mnt \
+    -e LIBRARY_PATH="${ARCH_LIBRARY_PATH:-/usr/lib/crystal/lib/}" \
+    -e CRYSTAL_CACHE_DIR="/tmp/crystal" \
+    "jhass/crystal-build-$ARCH" \
+    "$ARCH_CMD" /bin/bash -c "'$command'"
+
+  on_osx PATH="/usr/local/opt/llvm/bin:\$PATH" \
+    CRYSTAL_CACHE_DIR="/tmp/crystal" \
+    /bin/bash -c "'$command'"
+
+}
+
+usage() {
+  echo -e "bin/ci [-h|--help] command [parameter ...]"
+  echo -e ""
+  echo -e "Helper script to prepare and run the testsuite on Travis CI."
+  echo -e ""
+  echo -e "Commands:"
+  echo -e "  prepare_system          setup any necessaries repositories etc."
+  echo -e "  prepare_build           download and extract any dependencies needed for the build"
+  echo -e "  build                   run specs, build crystal, run format check, build samples, build the docs"
+  echo -e "  deploy                  deploy the docs"
+  echo -e "  with_build_env command  run command in the build environment"
+  echo -e "  help                    display this"
+  echo -e ""
+}
+
+command="$1"
+shift
+case $command in
+  prepare_system)
+    prepare_system
+    ;;
+  prepare_build)
+    prepare_build
+    ;;
+  with_build_env)
+    target_command="${@}"
+    with_build_env "$target_command"
+    ;;
+  build)
+    build
+    ;;
+  deploy)
+    deploy
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    if [ -n "$command" ]; then
+      fail "Unknown command $command"
+    else
+      usage
+      exit 1
+    fi
+    ;;
+esac

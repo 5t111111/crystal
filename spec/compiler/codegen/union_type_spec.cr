@@ -32,6 +32,8 @@ describe "Code gen: union type" do
   it "codegens union type for instance var" do
     run("
       class Foo
+        @value : Int32 | Float32
+
         def initialize(value)
           @value = value
         end
@@ -76,6 +78,8 @@ describe "Code gen: union type" do
       end
 
       class Foo
+        @x : Int32 | Char | Nil
+
         def foo(x)
           @x = x
           @x = @x || 1
@@ -176,115 +180,27 @@ describe "Code gen: union type" do
   end
 
   it "codegens union to_s" do
-    run(%(
+    str = run(%(
       require "prelude"
 
-      def foo(x : T)
+      def foo(x : T) forall T
         T.to_s
       end
 
       a = 1 || 1.5
       foo(a)
-      )).to_string.should eq("(Int32 | Float64)")
+      )).to_string
+    (str == "(Int32 | Float64)" || str == "(Float64 | Int32)").should be_true
   end
 
-  it "invokes method on union class" do
+  it "provides T as a tuple literal" do
     run(%(
-      struct Int32
-        def foo
-          3
-        end
-      end
-
-      struct Char
-        def foo
-          4
-        end
-      end
-
-      class Foo
-        def self.x
-          1
-        end
-      end
-
-      class Bar
-        def self.x
-          'a'
-        end
-      end
-
-      def foo(x : T)
-        T.x
-      end
-
-      a = Foo.new || Bar.new
-      f = foo(a)
-      f.foo
-      )).to_i.should eq(3)
-  end
-
-  it "invokes method on union class (2)" do
-    run(%(
-      struct Int32
-        def foo
-          3
-        end
-      end
-
-      struct Char
-        def foo
-          4
-        end
-      end
-
-      class Foo
-        def self.x(x : Int32)
-          1
-        end
-
-        def self.x(x : Char)
-          'a'
-        end
-      end
-
-      class Bar
-        def self.x(x)
-          1
-        end
-      end
-
-      def foo(x : T)
-        n = 'a' || 1
-        T.x(n)
-      end
-
-      a = Foo.new || Bar.new
-      f = foo(a)
-      f.foo
-      )).to_i.should eq(4)
-  end
-
-  it "invokes method on union class when nil is involved" do
-    run(%(
-      struct Int32
+      struct Union
         def self.foo
-          3
+          {{ T.class_name }}
         end
       end
-
-      struct Nil
-        def self.foo
-          4
-        end
-      end
-
-      def foo(x : T)
-        T.foo
-      end
-
-      a = 1 == 1 ? 1 : nil
-      foo(a)
-      )).to_i.should eq(4)
+      Union(Nil, Int32).foo
+      )).to_string.should eq("TupleLiteral")
   end
 end

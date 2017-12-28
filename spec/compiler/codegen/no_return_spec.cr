@@ -17,8 +17,76 @@ describe "Code gen: no return" do
         fun exit2 : NoReturn
       end
 
-      if (a = LibC.exit2) && a.length == 3
+      if (a = LibC.exit2) && a.size == 3
       end
+      ))
+  end
+
+  it "codegen types exception handler as NoReturn if ensure is NoReturn" do
+    codegen(%(
+      require "prelude"
+
+      lib LibC
+        fun foo : NoReturn
+      end
+
+      begin
+        1
+      ensure
+        LibC.foo
+      end
+      ))
+  end
+
+  it "codegens no return variable declaration (#1508)" do
+    run(%(
+      foo = uninitialized NoReturn
+      1
+      )).to_i.should eq(1)
+  end
+
+  it "codegens no return instance variable declaration (#1508)" do
+    run(%(
+      class Foo
+        def initialize
+          @foo = uninitialized NoReturn
+          @x = 1
+        end
+
+        def x
+          @x
+        end
+      end
+
+      Foo.new.x
+      )).to_i.should eq(1)
+  end
+
+  it "codegens call with no return because of falsey if (#3661)" do
+    codegen(%(
+      lib LibC
+        fun exit(Int32) : NoReturn
+      end
+
+      def bar(x)
+        x
+      end
+
+      def foo
+        bar(yield 1)
+      end
+
+      foo do |x|
+        LibC.exit(0) unless false
+      end
+      ))
+  end
+
+  it "codegens untyped typeof (#5105)" do
+    codegen(%(
+      require "prelude"
+
+      typeof(raise("").foo)
       ))
   end
 end

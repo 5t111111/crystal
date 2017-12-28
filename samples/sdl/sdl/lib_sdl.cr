@@ -1,10 +1,11 @@
-ifdef darwin
+{% if flag?(:darwin) %}
   @[Link("SDL")]
   @[Link("SDLMain")]
   @[Link(framework: "Cocoa")]
-else
+{% else %}
   @[Link("SDL")]
-end
+{% end %}
+
 lib LibSDL
   INIT_TIMER       = 0x00000001_u32
   INIT_AUDIO       = 0x00000010_u32
@@ -63,7 +64,7 @@ lib LibSDL
   PREALLOC    = 0x01000000_u32
 
   DISABLE = 0
-  ENABLE = 1
+  ENABLE  = 1
 
   struct Color
     r, g, b, unused : UInt8
@@ -76,51 +77,51 @@ lib LibSDL
 
   struct Surface
     flags : UInt32
-    format : Void* #TODO
+    format : Void* # TODO
     w, h : Int32
     pitch : UInt16
     pixels : Void*
-    #TODO
+    # TODO
   end
 
   enum Key
-    ESCAPE = 27
-    A = 97
-    B = 98
-    C = 99
-    D = 100
-    E = 101
-    F = 102
-    G = 103
-    H = 104
-    I = 105
-    J = 106
-    K = 107
-    L = 108
-    M = 109
-    N = 110
-    O = 111
-    P = 112
-    Q = 113
-    R = 114
-    S = 115
-    T = 116
-    U = 117
-    V = 118
-    W = 119
-    X = 120
-    Y = 121
-    Z = 122
-    UP = 273
-    DOWN = 274
-    RIGHT = 275
-    LEFT = 276
+    ESCAPE =  27
+    A      =  97
+    B      =  98
+    C      =  99
+    D      = 100
+    E      = 101
+    F      = 102
+    G      = 103
+    H      = 104
+    I      = 105
+    J      = 106
+    K      = 107
+    L      = 108
+    M      = 109
+    N      = 110
+    O      = 111
+    P      = 112
+    Q      = 113
+    R      = 114
+    S      = 115
+    T      = 116
+    U      = 117
+    V      = 118
+    W      = 119
+    X      = 120
+    Y      = 121
+    Z      = 122
+    UP     = 273
+    DOWN   = 274
+    RIGHT  = 275
+    LEFT   = 276
   end
 
   struct KeySym
     scan_code : UInt8
     sym : Key
-    #TODO
+    # TODO
   end
 
   struct KeyboardEvent
@@ -136,8 +137,8 @@ lib LibSDL
   end
 
   fun init = SDL_Init(flags : UInt32) : Int32
-  fun get_error = SDL_GetError() : UInt8*
-  fun quit = SDL_Quit() : Void
+  fun get_error = SDL_GetError : UInt8*
+  fun quit = SDL_Quit : Void
   fun set_video_mode = SDL_SetVideoMode(width : Int32, height : Int32, bpp : Int32, flags : UInt32) : Surface*
   fun delay = SDL_Delay(ms : UInt32) : Void
   fun poll_event = SDL_PollEvent(event : Event*) : Int32
@@ -148,18 +149,4 @@ lib LibSDL
   fun show_cursor = SDL_ShowCursor(toggle : Int32) : Int32
   fun get_ticks = SDL_GetTicks : UInt32
   fun flip = SDL_Flip(screen : Surface*) : Int32
-
-  ifdef linux
-    fun main = SDL_main(argc : Int32, argv : UInt8*) : Int32
-  end
-end
-
-ifdef linux
-  fun main(argc : Int32, argv : UInt8*)
-    return LibSDL.main(argc, argv)
-  end
-else
-  redefine_main(SDL_main) do |main|
-    {{main}}
-  end
 end

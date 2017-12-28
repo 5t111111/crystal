@@ -26,25 +26,24 @@ def bm(mask, offset) # bit mask
 end
 
 def transform(piece, all)
-  i = MyIterator.new piece, &.map{ |yx| {yx[1] + yx[0], -yx[0]} }
-  rots = i.take(all ? 6 : 3)
+  i = MyIterator.new piece, &.map { |(y, x)| {x + y, -y} }
+  rots = i.first(all ? 6 : 3)
   res = rots.flat_map do |cur_piece|
-    i2 = MyIterator.new cur_piece, &.map { |yx| {yx[1], yx[0]} }
-    i2.take(2)
+    i2 = MyIterator.new cur_piece, &.map { |(y, x)| {x, y} }
+    i2.first(2)
   end
 
   res.map do |cur_piece|
     dy, dx = cur_piece.min
-    cur_piece.map do |yx|
-      {yx[0] - dy, yx[1] - dx}
+    cur_piece.map do |(y, x)|
+      {y - dy, x - dx}
     end
   end
 end
 
 def mask(dy, dx, id, p)
   m = bo(50 + id)
-  p.each do |p1|
-    y, x = p1
+  p.each do |(y, x)|
     x2 = x + dx + (y + (dy % 2)) / 2
     return if x2 < 0 || x2 > 4
     y2 = y + dy
@@ -55,16 +54,16 @@ def mask(dy, dx, id, p)
 end
 
 PIECES = [
-    [{0,0},{0,1},{0,2},{0,3},{1,3}],
-    [{0,0},{0,2},{0,3},{1,0},{1,1}],
-    [{0,0},{0,1},{0,2},{1,2},{2,1}],
-    [{0,0},{0,1},{0,2},{1,1},{2,1}],
-    [{0,0},{0,2},{1,0},{1,1},{2,1}],
-    [{0,0},{0,1},{0,2},{1,1},{1,2}],
-    [{0,0},{0,1},{1,1},{1,2},{2,1}],
-    [{0,0},{0,1},{0,2},{1,0},{1,2}],
-    [{0,0},{0,1},{0,2},{1,2},{1,3}],
-    [{0,0},{0,1},{0,2},{0,3},{1,2}]
+  [{0, 0}, {0, 1}, {0, 2}, {0, 3}, {1, 3}],
+  [{0, 0}, {0, 2}, {0, 3}, {1, 0}, {1, 1}],
+  [{0, 0}, {0, 1}, {0, 2}, {1, 2}, {2, 1}],
+  [{0, 0}, {0, 1}, {0, 2}, {1, 1}, {2, 1}],
+  [{0, 0}, {0, 2}, {1, 0}, {1, 1}, {2, 1}],
+  [{0, 0}, {0, 1}, {0, 2}, {1, 1}, {1, 2}],
+  [{0, 0}, {0, 1}, {1, 1}, {1, 2}, {2, 1}],
+  [{0, 0}, {0, 1}, {0, 2}, {1, 0}, {1, 2}],
+  [{0, 0}, {0, 1}, {0, 2}, {1, 2}, {1, 3}],
+  [{0, 0}, {0, 1}, {0, 2}, {0, 3}, {1, 2}],
 ]
 
 def make_masks
@@ -82,7 +81,7 @@ def make_masks
   res
 end
 
-def is_board_unfeasible(board : UInt64, masks : Masks)
+def board_unfeasible?(board : UInt64, masks : Masks)
   coverable = board
 
   (0...50).select { |i| bm(board, i) == 0 }.each do |i|
@@ -102,7 +101,7 @@ def filter_masks(masks : Masks)
   masks.map do |p|
     p.map do |p2|
       p2.select do |m|
-        !is_board_unfeasible(m, masks)
+        !board_unfeasible?(m, masks)
       end
     end
   end
@@ -140,8 +139,9 @@ def print_sol(str)
 end
 
 class SolutionNode
-  def initialize(@x, @prev)
+  def initialize(@x : UInt64, @prev : SolutionNode?)
   end
+
   getter :x
   getter :prev
 
@@ -156,13 +156,14 @@ class SolutionNode
 end
 
 class Meteor
-  def initialize(@masks : Masks, @stop_after)
+  def initialize(@masks : Masks, @stop_after : Int32)
     @nb = 0
     @min = "9" * 50
     @max = "0" * 50
   end
-  property :min
-  property :max
+
+  property min : String
+  property max : String
   property :nb
 
   def handle_sol(cur)
@@ -203,5 +204,3 @@ puts "#{data.nb} solutions found"
 print_sol(data.min)
 print_sol(data.max)
 puts
-
-

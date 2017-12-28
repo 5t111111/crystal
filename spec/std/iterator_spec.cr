@@ -2,23 +2,35 @@ require "spec"
 require "iterator"
 
 describe Iterator do
-
   describe "Iterator.of" do
     it "creates singleton" do
       iter = Iterator.of(42)
-      iter.take(3).to_a.should eq([42, 42, 42])
+      iter.first(3).to_a.should eq([42, 42, 42])
     end
 
     it "creates singleton from block" do
       a = 0
       iter = Iterator.of { a += 1 }
-      iter.take(3).to_a.should eq([1, 2, 3])
+      iter.first(3).to_a.should eq([1, 2, 3])
+    end
+
+    it "creates singleton from block can call Iterator.stop" do
+      a = 0
+      iter = Iterator.of do
+        if a >= 5
+          Iterator.stop
+        else
+          a += 1
+        end
+      end
+      iter.should be_a(Iterator(Int32))
+      iter.first(10).to_a.should eq([1, 2, 3, 4, 5])
     end
   end
 
   describe "compact_map" do
     it "applies the function and removes nil values" do
-      iter = (1..3).each.compact_map {|e| e.odd? ? e : nil}
+      iter = (1..3).each.compact_map { |e| e.odd? ? e : nil }
       iter.next.should eq(1)
       iter.next.should eq(3)
       iter.next.should be_a(Iterator::Stop)
@@ -28,7 +40,7 @@ describe Iterator do
     end
 
     it "sums after compact_map to_a" do
-      (1..3).each.compact_map {|e| e.odd? ? e : nil}.to_a.sum.should eq(4)
+      (1..3).each.compact_map { |e| e.odd? ? e : nil }.to_a.sum.should eq(4)
     end
   end
 
@@ -51,7 +63,7 @@ describe Iterator do
 
   describe "compact_map" do
     it "does not return nil values" do
-      iter = [1, nil, 2, nil].each.compact_map {|e| e.try &.*(2)}
+      iter = [1, nil, 2, nil].each.compact_map { |e| e.try &.*(2) }
       iter.next.should eq 2
       iter.next.should eq 4
       iter.next.should be_a(Iterator::Stop)
@@ -117,7 +129,7 @@ describe Iterator do
     it "yields the individual elements to the block" do
       iter = ["a", "b", "c"].each
       concatinated = ""
-      iter.each {|e| concatinated += e}
+      iter.each { |e| concatinated += e }.should be_nil
       concatinated.should eq "abc"
     end
   end
@@ -136,6 +148,30 @@ describe Iterator do
       iter.next.should eq [1, 2, 3]
       iter.next.should eq [4]
       iter.next.should be_a Iterator::Stop
+    end
+
+    it "returns each_slice iterator with reuse = true" do
+      iter = (1..5).each.each_slice(2, reuse: true)
+
+      a = iter.next
+      a.should eq([1, 2])
+
+      b = iter.next
+      b.should eq([3, 4])
+      b.should be(a)
+    end
+
+    it "returns each_slice iterator with reuse = array" do
+      reuse = [] of Int32
+      iter = (1..5).each.each_slice(2, reuse: reuse)
+
+      a = iter.next
+      a.should eq([1, 2])
+      a.should be(reuse)
+
+      b = iter.next
+      b.should eq([3, 4])
+      b.should be(reuse)
     end
   end
 
@@ -172,7 +208,7 @@ describe Iterator do
     end
 
     it "raises argument error if size is less than 0" do
-      expect_raises ArgumentError, "size must be positive" do
+      expect_raises ArgumentError, "Size must be positive" do
         [1, 2, 3].each.in_groups_of(0)
       end
     end
@@ -180,6 +216,22 @@ describe Iterator do
     it "still works with other iterator methods like to_a" do
       iter = (1..3).each.in_groups_of(2, 'z')
       iter.to_a.should eq [[1, 2], [3, 'z']]
+    end
+
+    it "creats a group of two with reuse = true" do
+      iter = (1..3).each.in_groups_of(2, reuse: true)
+
+      a = iter.next
+      a.should eq([1, 2])
+
+      b = iter.next
+      b.should eq([3, nil])
+      b.should be(a)
+
+      iter.next.should be_a(Iterator::Stop)
+
+      iter.rewind
+      iter.next.should eq [1, 2]
     end
   end
 
@@ -242,7 +294,7 @@ describe Iterator do
 
   describe "skip_while" do
     it "does skip_while with an array" do
-      iter = [1, 2, 3, 4, 0].each.skip_while { |i| i < 3}
+      iter = [1, 2, 3, 4, 0].each.skip_while { |i| i < 3 }
       iter.next.should eq(3)
       iter.next.should eq(4)
       iter.next.should eq(0)
@@ -253,12 +305,12 @@ describe Iterator do
     end
 
     it "can skip everything" do
-      iter = (1..3).each.skip_while {true}
+      iter = (1..3).each.skip_while { true }
       iter.to_a.should eq [] of Int32
     end
 
     it "returns the full array if the condition is false for the first item" do
-      iter = (1..2).each.skip_while {false}
+      iter = (1..2).each.skip_while { false }
       iter.to_a.should eq [1, 2]
     end
 
@@ -268,7 +320,7 @@ describe Iterator do
         called += 1
         i < 3
       end
-      5.times {iter.next}
+      5.times { iter.next }
       called.should eq 3
     end
   end
@@ -286,9 +338,46 @@ describe Iterator do
     end
   end
 
-  describe "take" do
-    it "does take with Range iterator" do
-      iter = (1..3).each.take(2)
+  describe "step" do
+    it "returns every element" do
+      iter = (1..3).each.step(1)
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq(3)
+      iter.next.should be_a(Iterator::Stop)
+    end
+
+    it "returns every other element" do
+      iter = (1..5).each.step(2)
+      iter.next.should eq(1)
+      iter.next.should eq(3)
+      iter.next.should eq(5)
+      iter.next.should be_a(Iterator::Stop)
+    end
+
+    it "returns every third element" do
+      iter = (1..12).each.step(3)
+      iter.next.should eq(1)
+      iter.next.should eq(4)
+      iter.next.should eq(7)
+      iter.next.should eq(10)
+      iter.next.should be_a(Iterator::Stop)
+    end
+
+    it "raises with nonsensical steps" do
+      expect_raises(ArgumentError) do
+        (1..2).each.step(0)
+      end
+
+      expect_raises(ArgumentError) do
+        (1..2).each.step(-1)
+      end
+    end
+  end
+
+  describe "first" do
+    it "does first with Range iterator" do
+      iter = (1..3).each.first(2)
       iter.next.should eq(1)
       iter.next.should eq(2)
       iter.next.should be_a(Iterator::Stop)
@@ -297,25 +386,25 @@ describe Iterator do
       iter.next.should eq(1)
     end
 
-    it "does take with more than available" do
-      (1..3).each.take(10).to_a.should eq([1, 2, 3])
+    it "does first with more than available" do
+      (1..3).each.first(10).to_a.should eq([1, 2, 3])
     end
 
-    it "is cool to take 0 elements" do
-      iter = (1..3).each.take(0)
+    it "is cool to first 0 elements" do
+      iter = (1..3).each.first(0)
       iter.next.should be_a Iterator::Stop
     end
 
     it "raises ArgumentError if negative size is provided" do
       expect_raises(ArgumentError) do
-        (1..3).each.take(-1)
+        (1..3).each.first(-1)
       end
     end
   end
 
   describe "take_while" do
     it "does take_while with Range iterator" do
-      iter = (1..5).each.take_while {|i| i < 3}
+      iter = (1..5).each.take_while { |i| i < 3 }
       iter.next.should eq(1)
       iter.next.should eq(2)
       iter.next.should be_a(Iterator::Stop)
@@ -325,7 +414,7 @@ describe Iterator do
     end
 
     it "does take_while with more than available" do
-      (1..3).each.take_while{true}.to_a.should eq([1, 2, 3])
+      (1..3).each.take_while { true }.to_a.should eq([1, 2, 3])
     end
 
     it "only calls the block as much as needed" do
@@ -334,7 +423,7 @@ describe Iterator do
         called += 1
         i < 3
       end
-      5.times {iter.next}
+      5.times { iter.next }
       called.should eq 3
     end
   end
@@ -373,7 +462,7 @@ describe Iterator do
     end
 
     it "with block" do
-      iter = (1..8).each.uniq { |x| x % 3 }
+      iter = (1..8).each.uniq { |x| (x % 3).to_s }
       iter.next.should eq(1)
       iter.next.should eq(2)
       iter.next.should eq(3)
@@ -405,6 +494,22 @@ describe Iterator do
 
       iter.rewind
       iter.next.should eq({1, 10})
+    end
+
+    it "does with_index from range, with block" do
+      tuples = [] of {Int32, Int32}
+      (1..3).each.with_index do |value, index|
+        tuples << {value, index}
+      end
+      tuples.should eq([{1, 0}, {2, 1}, {3, 2}])
+    end
+
+    it "does with_index from range, with block with offset" do
+      tuples = [] of {Int32, Int32}
+      (1..3).each.with_index(10) do |value, index|
+        tuples << {value, index}
+      end
+      tuples.should eq([{1, 10}, {2, 11}, {3, 12}])
     end
   end
 
@@ -444,9 +549,167 @@ describe Iterator do
       (1..100).each
               .select { |x| 50 <= x < 60 }
               .map { |x| x * 2 }
-              .take(3)
+              .first(3)
               .to_a
               .should eq([100, 102, 104])
+    end
+  end
+
+  describe "flatten" do
+    it "flattens an iterator of mixed-type iterators" do
+      iter = [(1..2).each, ('a'..'b').each, {:c => 3}.each].each.flatten
+
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq('a')
+      iter.next.should eq('b')
+      iter.next.should eq({:c, 3})
+
+      iter.next.should be_a(Iterator::Stop)
+
+      iter.rewind
+      iter.next.should eq(1)
+
+      iter.rewind
+      iter.to_a.should eq([1, 2, 'a', 'b', {:c, 3}])
+    end
+
+    it "flattens an iterator of mixed-type elements and iterators" do
+      iter = [(1..2).each, 'a'].each.flatten
+
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq('a')
+
+      iter.next.should be_a(Iterator::Stop)
+
+      iter.rewind
+      iter.next.should eq(1)
+
+      iter.rewind
+      iter.to_a.should eq([1, 2, 'a'])
+    end
+
+    it "flattens an iterator of mixed-type elements and iterators and iterators of iterators" do
+      iter = [(1..2).each, [['a', 'b'].each].each, "foo"].each.flatten
+
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq('a')
+      iter.next.should eq('b')
+      iter.next.should eq("foo")
+
+      iter.next.should be_a(Iterator::Stop)
+
+      iter.rewind
+      iter.next.should eq(1)
+
+      iter.rewind
+      iter.to_a.should eq([1, 2, 'a', 'b', "foo"])
+    end
+
+    it "flattens deeply-nested and mixed type iterators" do
+      iter = [[[1], 2], [3, [[4, 5], 6], 7], "a"].each.flatten
+
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq(3)
+      iter.next.should eq(4)
+      iter.next.should eq(5)
+      iter.next.should eq(6)
+      iter.next.should eq(7)
+      iter.next.should eq("a")
+
+      iter.next.should be_a(Iterator::Stop)
+
+      iter.rewind
+      iter.next.should eq(1)
+
+      iter.rewind
+      iter.to_a.should eq([1, 2, 3, 4, 5, 6, 7, "a"])
+    end
+
+    it "flattens a variety of edge cases" do
+      ([] of Nil).each.flatten.to_a.should eq([] of Nil)
+      ['a'].each.flatten.to_a.should eq(['a'])
+      [[[[[["hi"]]]]]].each.flatten.to_a.should eq(["hi"])
+    end
+
+    it "flattens a deeply-nested iterables and arrays (#3703)" do
+      iter = [[1, {2, 3}, 4], [{5 => 6}, 7]].each.flatten
+
+      iter.next.should eq(1)
+      iter.next.should eq({2, 3})
+      iter.next.should eq(4)
+      iter.next.should eq({5 => 6})
+      iter.next.should eq(7)
+      iter.next.should be_a(Iterator::Stop)
+    end
+
+    it "return iterator itself by rewind" do
+      iter = [1, [2, 3], 4].each.flatten
+
+      iter.to_a.should eq([1, 2, 3, 4])
+      iter.rewind.to_a.should eq([1, 2, 3, 4])
+    end
+  end
+
+  describe "#flat_map" do
+    it "flattens returned arrays" do
+      iter = [1, 2, 3].each.flat_map { |x| [x, x] }
+
+      iter.next.should eq(1)
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq(2)
+      iter.next.should eq(3)
+      iter.next.should eq(3)
+
+      iter.rewind.to_a.should eq([1, 1, 2, 2, 3, 3])
+    end
+
+    it "flattens returned items" do
+      iter = [1, 2, 3].each.flat_map { |x| x }
+
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq(3)
+
+      iter.rewind.to_a.should eq([1, 2, 3])
+    end
+
+    it "flattens returned iterators" do
+      iter = [1, 2, 3].each.flat_map { |x| [x, x].each }
+
+      iter.next.should eq(1)
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq(2)
+      iter.next.should eq(3)
+      iter.next.should eq(3)
+
+      iter.rewind.to_a.should eq([1, 1, 2, 2, 3, 3])
+    end
+
+    it "flattens returned values" do
+      iter = [1, 2, 3].each.flat_map do |x|
+        case x
+        when 1
+          x
+        when 2
+          [x, x]
+        else
+          [x, x].each
+        end
+      end
+
+      iter.next.should eq(1)
+      iter.next.should eq(2)
+      iter.next.should eq(2)
+      iter.next.should eq(3)
+      iter.next.should eq(3)
+
+      iter.rewind.to_a.should eq([1, 2, 2, 3, 3])
     end
   end
 end

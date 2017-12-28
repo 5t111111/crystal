@@ -83,6 +83,11 @@ describe "Math" do
       Math.scalbln(0.11_f32, 2).should be_close(0.44, 1e-7)
       Math.scalbln(0.11, 2).should be_close(0.44, 1e-7)
     end
+
+    it "frexp" do
+      Math.frexp(0.2_f32).should eq({0.8_f32, -2})
+      Math.frexp(0.2).should eq({0.8, -2})
+    end
   end
 
   describe "Logarithms" do
@@ -150,6 +155,7 @@ describe "Math" do
     it "atan2" do
       Math.atan2(3.5_f32, 2.1_f32).should be_close(1.0303768265243125, 1e-7)
       Math.atan2(3.5, 2.1).should be_close(1.0303768265243125, 1e-7)
+      Math.atan2(1, 0).should eq(Math.atan2(1.0, 0.0))
     end
   end
 
@@ -191,11 +197,15 @@ describe "Math" do
     it "gamma" do
       Math.gamma(3.2_f32).should be_close(2.4239654799353683, 1e-6)
       Math.gamma(3.2).should be_close(2.4239654799353683, 1e-7)
+      Math.gamma(5).should eq 24
+      Math.gamma(5_i8).should eq 24
     end
 
     it "lgamma" do
       Math.lgamma(2.96_f32).should be_close(0.6565534110944214, 1e-7)
       Math.lgamma(2.96).should be_close(0.6565534110944214, 1e-7)
+      Math.lgamma(3).should be_close(0.6931471805599454, 1e-7)
+      Math.lgamma(3_i8).should be_close(0.6931471805599454, 1e-7)
     end
   end
 
@@ -243,9 +253,16 @@ describe "Math" do
     end
   end
 
-# div rem
+  # div rem
 
-# pw2ceil
+  # pw2ceil
 
-# ** (float and int)
+  describe "Rounding up to powers of 2" do
+    it "pw2ceil" do
+      Math.pw2ceil(33).should eq(64)
+      Math.pw2ceil(128).should eq(128)
+    end
+  end
+
+  # ** (float and int)
 end

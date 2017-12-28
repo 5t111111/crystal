@@ -1,16 +1,17 @@
 # :nodoc:
-class IO::ARGF
-  include IO
+class IO::ARGF < IO
+  @path : String?
+  @current_io : IO?
 
-  def initialize(@argv, @stdin)
+  def initialize(@argv : Array(String), @stdin : IO)
     @path = nil
     @current_io = nil
     @initialized = false
     @read_from_stdin = false
   end
 
-  def read(slice : Slice(UInt8))
-    count = slice.length
+  def read(slice : Bytes)
+    count = slice.size
     first_initialize unless @initialized
 
     if current_io = @current_io
@@ -28,8 +29,33 @@ class IO::ARGF
     read_count
   end
 
-  def write(slice : Slice(UInt8))
-    raise IO::Error.new "can't write to ARGF"
+  # :nodoc:
+  def peek
+    first_initialize unless @initialized
+
+    if current_io = @current_io
+      peek = current_io.peek
+      if peek && peek.empty? # EOF
+        peek_next
+      else
+        peek
+      end
+    else
+      peek_next
+    end
+  end
+
+  private def peek_next
+    if !@read_from_stdin && !@argv.empty?
+      read_next_argv
+      self.peek
+    else
+      nil
+    end
+  end
+
+  def write(slice : Bytes)
+    raise IO::Error.new "Can't write to ARGF"
   end
 
   def path

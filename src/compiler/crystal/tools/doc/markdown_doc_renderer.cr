@@ -1,3 +1,5 @@
+require "markdown"
+
 class Crystal::Doc::MarkdownDocRenderer < Markdown::HTMLRenderer
   def self.new(obj : Constant | Macro | Method, io)
     new obj.type, io
@@ -7,7 +9,7 @@ class Crystal::Doc::MarkdownDocRenderer < Markdown::HTMLRenderer
     super(io)
 
     @inside_inline_code = false
-    @code_buffer = StringIO.new
+    @code_buffer = IO::Memory.new
     @inside_code = false
     @inside_link = false
   end
@@ -44,31 +46,34 @@ class Crystal::Doc::MarkdownDocRenderer < Markdown::HTMLRenderer
 
     # Check Type#method(...) or Type or #method(...)
     text = text.gsub /\b
-      ([A-Z]\w+(?:\:\:[A-Z]\w+)?\#(?:\w|\<|\=|\>|\+|\-|\*|\/|\[|\]|\&|\||\?|\!|\^|\~)+(?:\?|\!)?(?:\(.+?\))?)
+      ((?:\:\:)?[A-Z]\w+(?:\:\:[A-Z]\w+)*(?:\#|\.)(?:\w|\<|\=|\>|\+|\-|\*|\/|\[|\]|\&|\||\?|\!|\^|\~)+(?:\?|\!)?(?:\(.+?\))?)
         |
-      ([A-Z]\w+(?:\:\:[A-Z]\w+)?)
+      ((?:\:\:)?[A-Z]\w+(?:\:\:[A-Z]\w+)*)
         |
-      (\#(?:\w|\<|\=|\>|\+|\-|\*|\/|\[|\]|\&|\||\?|\!|\^|\~)+(?:\?|\!)?(?:\(.+?\))?)
+      ((?:\#|\.)(?:\w|\<|\=|\>|\+|\-|\*|\/|\[|\]|\&|\||\?|\!|\^|\~)+(?:\?|\!)?(?:\(.+?\))?)
       /x do |match_text, match|
+      sharp_index = match_text.index('#')
+      dot_index = match_text.index('.')
+      kind = sharp_index ? :instance : :class
 
       # Type#method(...)
       if match[1]?
-        sharp_index = match_text.index('#').not_nil!
-        type_name = match_text[0 ... sharp_index]
+        separator_index = (sharp_index || dot_index).not_nil!
+        type_name = match_text[0...separator_index]
 
         paren_index = match_text.index('(')
 
         if paren_index
-          method_name = match_text[sharp_index + 1 ... paren_index]
-          method_args = match_text[paren_index + 1 .. -2]
+          method_name = match_text[separator_index + 1...paren_index]
+          method_args = match_text[paren_index + 1..-2]
         else
-          method_name = match_text[sharp_index + 1 .. -1]
+          method_name = match_text[separator_index + 1..-1]
           method_args = ""
         end
 
-        another_type = @type.lookup_type(type_name.split("::"))
+        another_type = @type.lookup_path(type_name)
         if another_type && @type.must_be_included?
-          method = lookup_method another_type, method_name, method_args
+          method = lookup_method another_type, method_name, method_args, kind
           if method
             next method_link method, match_text
           end
@@ -77,7 +82,7 @@ class Crystal::Doc::MarkdownDocRenderer < Markdown::HTMLRenderer
 
       # Type
       if match[2]?
-        another_type = @type.lookup_type(match_text.split("::"))
+        another_type = @type.lookup_path(match_text)
         if another_type && another_type.must_be_included?
           next type_link another_type, match_text
         end
@@ -88,14 +93,14 @@ class Crystal::Doc::MarkdownDocRenderer < Markdown::HTMLRenderer
         paren_index = match_text.index('(')
 
         if paren_index
-          method_name = match_text[1 ... paren_index]
-          method_args = match_text[paren_index + 1 .. -2]
+          method_name = match_text[1...paren_index]
+          method_args = match_text[paren_index + 1..-2]
         else
-          method_name = match_text[1 .. -1]
+          method_name = match_text[1..-1]
           method_args = ""
         end
 
-        method = lookup_method @type, method_name, method_args
+        method = lookup_method @type, method_name, method_args, kind
         if method && method.must_be_included?
           next method_link method, match_text
         end
@@ -168,7 +173,7 @@ class Crystal::Doc::MarkdownDocRenderer < Markdown::HTMLRenderer
     %(<a href="#{method.type.path_from(@type)}#{method.anchor}">#{text}</a>)
   end
 
-  def lookup_method(type, name, args)
+  def lookup_method(type, name, args, kind = nil)
     case args
     when ""
       args_count = nil
@@ -178,8 +183,14 @@ class Crystal::Doc::MarkdownDocRenderer < Markdown::HTMLRenderer
       args_count = args.chars.count(',') + 1
     end
 
-    type.lookup_method(name, args_count) ||
-      type.lookup_class_method(name, args_count) ||
+    base_match =
+      case kind
+      when :class
+        type.lookup_class_method(name, args_count) || type.lookup_method(name, args_count)
+      else
+        type.lookup_method(name, args_count) || type.lookup_class_method(name, args_count)
+      end
+    base_match ||
       type.lookup_macro(name, args_count) ||
       type.program.lookup_macro(name, args_count)
   end

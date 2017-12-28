@@ -2,10 +2,10 @@
 
 require "./sdl/sdl"
 
-WIDTH = 1280
-HEIGHT = 720
-FOV = 45.0
-MAX_DEPTH = 6
+WIDTH     = 1280
+HEIGHT    =  720
+FOV       = 45.0
+MAX_DEPTH =    6
 
 struct Vec3
   getter :x
@@ -51,20 +51,14 @@ struct Vec3
   end
 end
 
-struct Ray
-  getter :start
-  getter :dir
-
-  def initialize(@start, @dir)
-  end
-end
+record Ray, start : Vec3, dir : Vec3
 
 class Sphere
   getter :color
   getter :reflection
   getter :transparency
 
-  def initialize(@center, @radius, @color, @reflection = 0.0, @transparency = 0.0)
+  def initialize(@center : Vec3, @radius : Float64, @color : Vec3, @reflection = 0.0, @transparency = 0.0)
   end
 
   def intersects?(ray)
@@ -99,21 +93,8 @@ class Sphere
   end
 end
 
-class Light
-  getter :position
-  getter :color
-
-  def initialize(@position, @color)
-  end
-end
-
-class Scene
-  getter :objects
-  getter :lights
-
-  def initialize(@objects, @lights)
-  end
-end
+record Light, position : Vec3, color : Vec3
+record Scene, objects : Array(Sphere), lights : Array(Light)
 
 def trace(ray, scene, depth)
   nearest = 1e9
@@ -182,7 +163,7 @@ def trace(ray, scene, depth)
         gc = normal * Math.sqrt(1 - sin_t2_2)
         refraction_direction = gf - gc
         refraction = trace(Ray.new(point_of_hit - normal * 1.0e-4, refraction_direction),
-                                scene, depth + 1)
+          scene, depth + 1)
         result += refraction * (1.0 - fresneleffect) * obj.transparency
       end
     end
@@ -205,9 +186,9 @@ def render(scene, surface)
     yy = y.to_f64
     WIDTH.times do |x|
       xx = x.to_f64
-      dir = Vec3.new((xx - ww / 2.0) / ww  * w,
-                           (hh / 2.0 - yy) / hh * h,
-                           -1.0).normalize
+      dir = Vec3.new((xx - ww / 2.0) / ww * w,
+        (hh / 2.0 - yy) / hh * h,
+        -1.0).normalize
       pixel = trace(Ray.new(eye, dir), scene, 0.0)
       r = Math.min(255, (pixel.x * 255.0).round.to_i)
       g = Math.min(255, (pixel.y * 255.0).round.to_i)
@@ -223,24 +204,37 @@ end
 
 Signal::INT.trap { exit }
 
+scene = Scene.new(
+  [
+    Sphere.new(Vec3.new(0.0, -10002.0, -20.0), 10000.0, Vec3.new(0.8, 0.8, 0.8)),
+    Sphere.new(Vec3.new(0.0, 2.0, -20.0), 4.0, Vec3.new(0.8, 0.5, 0.5), 0.5),
+    Sphere.new(Vec3.new(5.0, 0.0, -15.0), 2.0, Vec3.new(0.3, 0.8, 0.8), 0.2),
+    Sphere.new(Vec3.new(-5.0, 0.0, -15.0), 2.0, Vec3.new(0.3, 0.5, 0.8), 0.2),
+    Sphere.new(Vec3.new(-2.0, -1.0, -10.0), 1.0, Vec3.new(0.1, 0.1, 0.1), 0.1, 0.8),
+  ],
+  [
+    Light.new(Vec3.new(-10.0, 20.0, 30.0), Vec3.new(2.0, 2.0, 2.0)),
+  ]
+)
+
 SDL.init
 SDL.hide_cursor
 surface = SDL.set_video_mode WIDTH, HEIGHT, 32, LibSDL::DOUBLEBUF | LibSDL::HWSURFACE | LibSDL::ASYNCBLIT
-scene = Scene.new(
-          [
-            Sphere.new(Vec3.new(0.0, -10002.0, -20.0), 10000.0, Vec3.new(0.8, 0.8, 0.8)),
-            Sphere.new(Vec3.new(0.0, 2.0, -20.0), 4.0, Vec3.new(0.8, 0.5, 0.5), 0.5),
-            Sphere.new(Vec3.new(5.0, 0.0, -15.0), 2.0, Vec3.new(0.3, 0.8, 0.8), 0.2),
-            Sphere.new(Vec3.new(-5.0, 0.0, -15.0), 2.0, Vec3.new(0.3, 0.5, 0.8), 0.2),
-            Sphere.new(Vec3.new(-2.0, -1.0, -10.0), 1.0, Vec3.new(0.1, 0.1, 0.1), 0.1, 0.8),
-          ],
-          [
-            Light.new(Vec3.new(-10.0, 20.0, 30.0), Vec3.new(2.0, 2.0, 2.0)),
-          ]
-          )
 
-start = SDL.ticks
-render scene, surface
-ms = SDL.ticks - start
-puts "Rendered in #{ms} ms"
-gets
+first = true
+while true
+  SDL.poll_events do |event|
+    if event.type == LibSDL::QUIT || event.type == LibSDL::KEYDOWN
+      SDL.quit
+      exit
+    end
+  end
+
+  if first
+    start = SDL.ticks
+    render scene, surface
+    ms = SDL.ticks - start
+    puts "Rendered in #{ms} ms"
+    first = false
+  end
+end

@@ -5,6 +5,7 @@ module Crystal::Doc::Highlighter
     lexer = Lexer.new(code)
     lexer.comments_enabled = true
     lexer.count_whitespace = true
+    lexer.wants_raw = true
 
     String.build do |io|
       begin
@@ -27,20 +28,17 @@ module Crystal::Doc::Highlighter
       when :COMMENT
         highlight HTML.escape(token.value.to_s), "c", io
       when :NUMBER
-        highlight token, "n", io
+        highlight token.raw, "n", io
       when :CHAR
-        highlight token.value.inspect, "s", io
+        highlight token.raw, "s", io
       when :SYMBOL
-        sym = token.value.to_s
-        if Symbol.needs_quotes?(sym)
-          highlight HTML.escape(%(:#{sym.inspect})), "n", io
-        else
-          highlight ":#{sym}", "n", io
-        end
+        highlight HTML.escape(token.raw), "n", io
       when :CONST, :"::"
         highlight token, "t", io
       when :DELIMITER_START
         highlight_delimiter_state lexer, token, io
+      when :STRING_ARRAY_START, :SYMBOL_ARRAY_START
+        highlight_string_array lexer, token, io
       when :EOF
         break
       when :IDENT
@@ -54,7 +52,7 @@ module Crystal::Doc::Highlighter
                :while, :until, :do, :yield, :return, :unless, :next, :break, :begin,
                :lib, :fun, :type, :struct, :union, :enum, :macro, :out, :require,
                :case, :when, :then, :of, :abstract, :rescue, :ensure, :is_a?,
-               :alias, :pointerof, :sizeof, :instance_sizeof, :ifdef, :as, :typeof, :for, :in,
+               :alias, :pointerof, :sizeof, :instance_sizeof, :as, :typeof, :for, :in,
                :undef, :with, :self, :super, :private, :protected, "new"
             highlight token, "k", io
           when :true, :false, :nil
@@ -82,55 +80,66 @@ module Crystal::Doc::Highlighter
   end
 
   private def highlight_delimiter_state(lexer, token, io)
-    start_highlight_klass "s", io
+    start_highlight_class "s", io
 
-    delimiter_end = token.delimiter_state.end
-    case delimiter_end
-    when '/' then io << '/'
-    when '"' then io << '"'
-    when '`' then io << '`'
-    when ')' then io << "%("
-    end
+    HTML.escape(token.raw, io)
 
     while true
       token = lexer.next_string_token(token.delimiter_state)
       case token.type
       when :DELIMITER_END
-        io << delimiter_end
-        end_highlight_klass io
+        HTML.escape(token.raw, io)
+        end_highlight_class io
         break
       when :INTERPOLATION_START
-        end_highlight_klass io
+        end_highlight_class io
         highlight "\#{", "i", io
-        end_highlight_klass io
+        end_highlight_class io
         highlight_normal_state lexer, io, break_on_rcurly: true
-        start_highlight_klass "s", io
+        start_highlight_class "s", io
         highlight "}", "i", io
       when :EOF
         break
       else
-        if delimiter_end == '/'
-          token.value.to_s(io)
-        else
-          HTML.escape(token.value.to_s.inspect_unquoted, io)
-        end
+        HTML.escape(token.raw, io)
+      end
+    end
+  end
+
+  private def highlight_string_array(lexer, token, io)
+    start_highlight_class "s", io
+    HTML.escape(token.raw, io)
+    first = true
+    while true
+      lexer.next_string_array_token
+      case token.type
+      when :STRING
+        io << " " unless first
+        HTML.escape(token.raw, io)
+        first = false
+      when :STRING_ARRAY_END
+        HTML.escape(token.raw, io)
+        end_highlight_class io
+        break
+      when :EOF
+        raise "Unterminated symbol array literal"
       end
     end
   end
 
   private def highlight(token, klass, io)
-    start_highlight_klass klass, io
+    start_highlight_class klass, io
     io << token
-    end_highlight_klass io
+    end_highlight_class io
   end
 
-  private def start_highlight_klass(klass, io)
+  private def start_highlight_class(klass, io)
     io << %(<span class=")
     io << klass
     io << %(">)
   end
 
-  private def end_highlight_klass(io)
+  private def end_highlight_class(io)
     io << %(</span>)
   end
 end

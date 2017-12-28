@@ -106,25 +106,29 @@ describe "Code gen: enum" do
 
   it "codegens enum None redefined" do
     run(%(
-      @[Flags]
-      enum Foo
-        A
-        None = 10
+      lib Lib
+        @[Flags]
+        enum Foo
+          A
+          None = 10
+        end
       end
 
-      Foo::None
+      Lib::Foo::None
       )).to_i.should eq(10)
   end
 
   it "codegens enum All redefined" do
     run(%(
-      @[Flags]
-      enum Foo
-        A
-        All = 10
+      lib Lib
+        @[Flags]
+        enum Foo
+          A
+          All = 10
+        end
       end
 
-      Foo::All
+      Lib::Foo::All
       )).to_i.should eq(10)
   end
 
@@ -141,6 +145,181 @@ describe "Code gen: enum" do
       end
 
       Foo.class_var
+      )).to_i.should eq(1)
+  end
+
+  it "automatically defines question method for each enum member (false case)" do
+    run(%(
+      struct Enum
+        def ==(other : self)
+          value == other.value
+        end
+      end
+
+      enum Day
+        SomeMonday
+        SomeTuesday
+      end
+
+      day = Day::SomeTuesday
+      day.some_monday?
+      )).to_b.should be_false
+  end
+
+  it "automatically defines question method for each enum member (true case)" do
+    run(%(
+      struct Enum
+        def ==(other : self)
+          value == other.value
+        end
+      end
+
+      enum Day
+        SomeMonday
+        SomeTuesday
+      end
+
+      day = Day::SomeTuesday
+      day.some_tuesday?
+      )).to_b.should be_true
+  end
+
+  it "automatically defines question method for each enum member (flags, false case)" do
+    run(%(
+      struct Enum
+        def includes?(other : self)
+          (value & other.value) != 0
+        end
+      end
+
+      @[Flags]
+      enum Day
+        SomeMonday
+        SomeTuesday
+        SomeWednesday
+      end
+
+      day = Day.new(3)
+      day.some_wednesday?
+      )).to_b.should be_false
+  end
+
+  it "automatically defines question method for each enum member (flags, true case)" do
+    run(%(
+      struct Enum
+        def includes?(other : self)
+          (value & other.value) != 0
+        end
+      end
+
+      @[Flags]
+      enum Day
+        SomeMonday
+        SomeTuesday
+        SomeWednesday
+      end
+
+      day = Day.new(3)
+      day.some_tuesday?
+      )).to_b.should be_true
+  end
+
+  it "does ~ at compile time for enum member" do
+    run(%(
+      enum Foo
+        Bar = ~1
+      end
+
+      Foo::Bar.value
+      )).to_i.should eq(~1)
+  end
+
+  it "uses enum value before declaration (hoisting)" do
+    run(%(
+      x = Bar.bar
+
+      enum Foo
+        A = 1
+      end
+
+      class Bar
+        def self.bar
+          Foo::A
+        end
+      end
+
+      x
+      )).to_i.should eq(1)
+  end
+
+  it "casts All value to base type" do
+    run(%(
+      @[Flags]
+      enum Foo
+        A = 1 << 30
+        B = 1 << 31
+      end
+
+      Foo::All.value
+      )).to_i.should eq(-1073741824)
+  end
+
+  it "can use macro calls inside enum value (#424)" do
+    run(%(
+      enum Foo
+        macro bar
+          10 + 20
+        end
+
+        A = bar
+      end
+
+      Foo::A.value
+      )).to_i.should eq(30)
+  end
+
+  it "can use macro calls inside enum value, macro defined outside enum (#424)" do
+    run(%(
+      macro bar
+        10 + 20
+      end
+
+      enum Foo
+        A = bar
+      end
+
+      Foo::A.value
+      )).to_i.should eq(30)
+  end
+
+  it "can use macro calls inside enum value, with receiver (#424)" do
+    run(%(
+      module Moo
+        macro bar
+          10 + 20
+        end
+      end
+
+      enum Foo
+        A = Moo.bar
+      end
+
+      Foo::A.value
+      )).to_i.should eq(30)
+  end
+
+  it "adds a none? method to flags enum" do
+    run(%(
+      @[Flags]
+      enum Foo
+        A
+        B
+      end
+
+      x = 0
+      x += 1 if Foo::None.none?
+      x += 2 if Foo::A.none?
+      x
       )).to_i.should eq(1)
   end
 end

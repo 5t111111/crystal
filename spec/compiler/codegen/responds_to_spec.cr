@@ -21,11 +21,11 @@ describe "Codegen: responds_to?" do
     run("struct Nil; def foo; end; end; (1 == 1 ? nil : Reference.new).responds_to?(:foo)").to_b.should be_true
   end
 
-  it "codegens responds_to? with nilable gives false becuase other type 1" do
+  it "codegens responds_to? with nilable gives false because other type 1" do
     run("(1 == 1 ? nil : Reference.new).responds_to?(:foo)").to_b.should be_false
   end
 
-  it "codegens responds_to? with nilable gives false becuase other type 2" do
+  it "codegens responds_to? with nilable gives false because other type 2" do
     run("class Reference; def foo; end; end; (1 == 2 ? nil : Reference.new).responds_to?(:foo)").to_b.should be_true
   end
 
@@ -101,6 +101,38 @@ describe "Codegen: responds_to?" do
       )).to_b.should be_true
   end
 
+  it "works with virtual class type (1) (#1926)" do
+    run(%(
+      class Foo
+      end
+
+      class Bar < Foo
+        def self.foo
+          1
+        end
+      end
+
+      foo = Bar || Foo
+      foo.responds_to?(:foo)
+      )).to_b.should be_true
+  end
+
+  it "works with virtual class type (2) (#1926)" do
+    run(%(
+      class Foo
+      end
+
+      class Bar < Foo
+        def self.foo
+          1
+        end
+      end
+
+      foo = Foo || Bar
+      foo.responds_to?(:foo)
+      )).to_b.should be_false
+  end
+
   it "works with module" do
     run(%(
       module Moo
@@ -128,6 +160,18 @@ describe "Codegen: responds_to?" do
 
       moo = ptr.value
       moo.responds_to?(:foo)
+      )).to_b.should be_true
+  end
+
+  it "does for generic instance type metaclass (#4353)" do
+    run(%(
+      class MyGeneric(T)
+        def self.hallo
+          1
+        end
+      end
+
+      MyGeneric(String).responds_to? :hallo
       )).to_b.should be_true
   end
 end

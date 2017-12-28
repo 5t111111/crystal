@@ -54,7 +54,7 @@ class JSON::PullParser
   def assert(hash : Hash)
     assert_object do
       hash.each do |key, value|
-        assert(key as String) do
+        assert(key.as(String)) do
           assert value
         end
       end
@@ -70,7 +70,7 @@ class JSON::PullParser
   end
 
   def assert_array
-    assert_array {}
+    assert_array { }
   end
 
   def assert_object
@@ -82,7 +82,7 @@ class JSON::PullParser
   end
 
   def assert_object
-    assert_object {}
+    assert_object { }
   end
 
   def assert_error
@@ -95,7 +95,7 @@ end
 private def assert_pull_parse(string)
   it "parses #{string}" do
     parser = JSON::PullParser.new string
-    parser.assert JSON.parse(string)
+    parser.assert JSON.parse(string).raw
     parser.kind.should eq(:EOF)
   end
 end
@@ -111,7 +111,14 @@ private def assert_pull_parse_error(string)
   end
 end
 
-describe "JSON::PullParser" do
+private def assert_raw(string, file = __FILE__, line = __LINE__)
+  it "parses raw #{string.inspect}", file, line do
+    pull = JSON::PullParser.new(string)
+    pull.read_raw.should eq(string)
+  end
+end
+
+describe JSON::PullParser do
   assert_pull_parse "null"
   assert_pull_parse "false"
   assert_pull_parse "true"
@@ -155,6 +162,30 @@ describe "JSON::PullParser" do
   assert_pull_parse_error %({"name": "John", "age", 1})
   assert_pull_parse_error %({"name": "John", "age": "foo", "bar"})
 
+  it "prevents stack overflow for arrays" do
+    parser = JSON::PullParser.new(("[" * 513) + ("]" * 513))
+    expect_raises JSON::ParseException, "Nesting of 513 is too deep" do
+      while true
+        break if parser.kind == :EOF
+        parser.read_next
+      end
+    end
+  end
+
+  it "prevents stack overflow for hashes" do
+    parser = JSON::PullParser.new((%({"x": ) * 513) + ("}" * 513))
+    expect_raises JSON::ParseException, "Nesting of 513 is too deep" do
+      while true
+        break if parser.kind == :EOF
+        parser.read_next
+      end
+    end
+  end
+
+  # Prevent too deep nesting (prevents stack overflow)
+  assert_pull_parse_error(("[" * 513) + ("]" * 513))
+  assert_pull_parse_error(("{" * 513) + ("}" * 513))
+
   describe "skip" do
     [
       {"null", "null"},
@@ -164,9 +195,9 @@ describe "JSON::PullParser" do
       {"string", %("hello")},
       {"array", %([10, 20, [30], [40]])},
       {"object", %({"foo": [1, 2], "bar": {"baz": [3]}})},
-    ].each do |tuple|
-      it "skips #{tuple[0]}" do
-        pull = JSON::PullParser.new("[1, #{tuple[1]}, 2]")
+    ].each do |(desc, obj)|
+      it "skips #{desc}" do
+        pull = JSON::PullParser.new("[1, #{obj}, 2]")
         pull.read_array do
           pull.read_int.should eq(1)
           pull.skip
@@ -263,7 +294,7 @@ describe "JSON::PullParser" do
     it "doesn't find key with bang" do
       pull = JSON::PullParser.new(%({"foo": 1, "baz": 2}))
 
-      expect_raises Exception, "json key not found: bar" do
+      expect_raises Exception, "JSON key not found: bar" do
         pull.on_key!("bar") do
         end
       end
@@ -285,5 +316,17 @@ describe "JSON::PullParser" do
         end
       end
     end
+  end
+
+  describe "raw" do
+    assert_raw "null"
+    assert_raw "true"
+    assert_raw "false"
+    assert_raw "1234"
+    assert_raw "1234.5678"
+    assert_raw %("hello")
+    assert_raw %([1,"hello",true,false,null,[1,2,3]])
+    assert_raw %({"foo":[1,2,{"bar":[1,"hello",true,false,1.5]}]})
+    assert_raw %({"foo":"bar"})
   end
 end

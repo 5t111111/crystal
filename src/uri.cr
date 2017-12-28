@@ -1,3 +1,5 @@
+require "./uri/uri_parser"
+
 # This class represents a URI reference as defined by [RFC 3986: Uniform Resource Identifier
 # (URI): Generic Syntax](https://www.ietf.org/rfc/rfc3986.txt).
 #
@@ -11,111 +13,108 @@
 # require "uri"
 #
 # uri = URI.parse "http://foo.com/posts?id=30&limit=5#time=1305298413"
-# # => #&lt;URI:0x1003f1e40 @scheme="http", @host="foo.com", @port=nil, @path="/posts", @query="id=30&limit=5", ... >
-# uri.scheme
-# # => "http"
-# uri.host
-# # => "foo.com"
-# uri.query
-# # => "id=30&limit=5"
-# uri.to_s
-# # => "http://foo.com/posts?id=30&limit=5#time=1305298413"
+# # => #<URI:0x1003f1e40 @scheme="http", @host="foo.com", @port=nil, @path="/posts", @query="id=30&limit=5", ... >
+# uri.scheme # => "http"
+# uri.host   # => "foo.com"
+# uri.query  # => "id=30&limit=5"
+# uri.to_s   # => "http://foo.com/posts?id=30&limit=5#time=1305298413"
 # ```
 class URI
-  # URI defined in RFC3986
-  RFC3986_URI = /\A(?<URI>(?<scheme>[A-Za-z][+\-.0-9A-Za-z]*):(?<hier_part>\/\/(?<authority>(?:(?<userinfo>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=A-Z_a-z~])*)@)?(?<host>(?<IP_literal>\[(?:(?<IPv6address>(?:[0-9a-fA-F]{1,4}:){6}(?<ls32>[0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|(?<IPv4address>(?<dec_octet>[1-9]\d|1\d{2}|2[0-4]\d|25[0-5]|\d)\.\g<dec_octet>\.\g<dec_octet>\.\g<dec_octet>))|::(?:[0-9a-fA-F]{1,4}:){5}\g<ls32>|[0-9a-fA-F]{1,4}?::(?:[0-9a-fA-F]{1,4}:){4}\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:)?[0-9a-fA-F]{1,4})?::(?:[0-9a-fA-F]{1,4}:){3}\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,2}[0-9a-fA-F]{1,4})?::(?:[0-9a-fA-F]{1,4}:){2}\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,3}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}:\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,4}[0-9a-fA-F]{1,4})?::\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(?:(?:[0-9a-fA-F]{1,4}:){,6}[0-9a-fA-F]{1,4})?::)|(?<IPvFuture>v[0-9a-fA-F]+\.[!$&-.0-;=A-Z_a-z~]+))\])|\g<IPv4address>|(?<reg_name>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-9;=A-Z_a-z~])+))?(?::(?<port>\d*))?)(?<path_abempty>(?:\/(?<segment>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=@-Z_a-z~])*))*)|(?<path_absolute>\/(?:(?<segment_nz>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=@-Z_a-z~])+)(?:\/\g<segment>)*)?)|(?<path_rootless>\g<segment_nz>(?:\/\g<segment>)*)|(?<path_empty>))(?:\?(?<query>[^#]*))?(?:\#(?<fragment>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=@-Z_a-z~\/?])*))?)\z/
-  RFC3986_relative_ref = /\A(?<relative_ref>(?<relative_part>\/\/(?<authority>(?:(?<userinfo>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=A-Z_a-z~])*)@)?(?<host>(?<IP_literal>\[(?<IPv6address>(?:[0-9a-fA-F]{1,4}:){6}(?<ls32>[0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|(?<IPv4address>(?<dec_octet>[1-9]\d|1\d{2}|2[0-4]\d|25[0-5]|\d)\.\g<dec_octet>\.\g<dec_octet>\.\g<dec_octet>))|::(?:[0-9a-fA-F]{1,4}:){5}\g<ls32>|[0-9a-fA-F]{1,4}?::(?:[0-9a-fA-F]{1,4}:){4}\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,1}[0-9a-fA-F]{1,4})?::(?:[0-9a-fA-F]{1,4}:){3}\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,2}[0-9a-fA-F]{1,4})?::(?:[0-9a-fA-F]{1,4}:){2}\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,3}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}:\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,4}[0-9a-fA-F]{1,4})?::\g<ls32>|(?:(?:[0-9a-fA-F]{1,4}:){,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(?:(?:[0-9a-fA-F]{1,4}:){,6}[0-9a-fA-F]{1,4})?::)|(?<IPvFuture>v[0-9a-fA-F]+\.[!$&-.0-;=A-Z_a-z~]+)\])|\g<IPv4address>|(?<reg_name>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-9;=A-Z_a-z~])+))?(?::(?<port>\d*))?)(?<path_abempty>(?:\/(?<segment>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=@-Z_a-z~])*))*)|(?<path_absolute>\/(?:(?<segment_nz>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=@-Z_a-z~])+)(?:\/\g<segment>)*)?)|(?<path_noscheme>(?<segment_nz_nc>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-9;=@-Z_a-z~])+)(?:\/\g<segment>)*)|(?<path_empty>))(?:\?(?<query>[^#]*))?(?:\#(?<fragment>(?:%[0-9a-fA-F][0-9a-fA-F]|[!$&-.0-;=@-Z_a-z~\/?])*))?)\z/
+  class Error < Exception
+  end
 
   # Returns the scheme component of the URI.
   #
   # ```
-  # URI.parse("http://foo.com").scheme # => "http"
+  # URI.parse("http://foo.com").scheme           # => "http"
   # URI.parse("mailto:alice@example.com").scheme # => "mailto"
   # ```
-  getter scheme
+  getter scheme : String?
 
   # Sets the scheme component of the URI.
-  setter scheme
+  setter scheme : String?
 
   # Returns the host component of the URI.
   #
   # ```
   # URI.parse("http://foo.com").host # => "foo.com"
   # ```
-  getter host
+  getter host : String?
 
   # Sets the host component of the URI.
-  setter host
+  setter host : String?
 
   # Returns the port component of the URI.
   #
   # ```
   # URI.parse("http://foo.com:5432").port # => 5432
   # ```
-  getter port
+  getter port : Int32?
 
   # Sets the port component of the URI.
-  setter port
+  setter port : Int32?
 
   # Returns the path component of the URI.
   #
   # ```
   # URI.parse("http://foo.com/bar").path # => "/bar"
   # ```
-  getter path
+  getter path : String?
 
   # Sets the path component of the URI.
-  setter path
+  setter path : String?
 
   # Returns the query component of the URI.
   #
   # ```
   # URI.parse("http://foo.com/bar?q=1").query # => "q=1"
   # ```
-  getter query
+  getter query : String?
 
   # Sets the query component of the URI.
-  setter query
+  setter query : String?
 
   # Returns the user component of the URI.
   #
   # ```
   # URI.parse("http://admin:password@foo.com").user # => "admin"
   # ```
-  getter user
+  getter user : String?
 
   # Sets the user component of the URI.
-  setter user
+  setter user : String?
 
   # Returns the password component of the URI.
   #
   # ```
   # URI.parse("http://admin:password@foo.com").password # => "password"
   # ```
-  getter password
+  getter password : String?
 
   # Sets the password component of the URI.
-  setter password
+  setter password : String?
 
   # Returns the fragment component of the URI.
   #
   # ```
   # URI.parse("http://foo.com/bar#section1").fragment # => "section1"
   # ```
-  getter fragment
+  getter fragment : String?
 
   # Sets the fragment component of the URI.
-  setter fragment
+  setter fragment : String?
 
   # Returns the opaque component of the URI.
   #
   # ```
   # URI.parse("mailto:alice@example.com").opaque # => "alice@example.com"
   # ```
-  getter opaque
+  getter opaque : String?
 
   # Sets the opaque component of the URI.
-  setter opaque
+  setter opaque : String?
+
+  def_equals_and_hash scheme, host, port, path, query, user, password, fragment, opaque
 
   def initialize(@scheme = nil, @host = nil, @port = nil, @path = nil, @query = nil, @user = nil, @password = nil, @fragment = nil, @opaque = nil)
   end
@@ -128,8 +127,10 @@ class URI
   # ```
   def full_path
     String.build do |str|
-      str << (@path.try {|p| !p.empty?} ? @path : "/")
-      str << "?" << @query if @query
+      str << (@path.try { |p| !p.empty? } ? @path : "/")
+      if (query = @query) && !query.empty?
+        str << "?" << query
+      end
     end
   end
 
@@ -167,55 +168,149 @@ class URI
     end
   end
 
+  # Returns normalized URI.
+  def normalize
+    uri = dup
+    uri.normalize!
+    uri
+  end
+
+  # Destructive normalize.
+  def normalize!
+    @path = remove_dot_segments(path)
+  end
+
   # Parses `raw_url` into an URI. The `raw_url` may be relative or absolute.
   #
   # ```
-  # require 'uri'
+  # require "uri"
   #
-  # uri = URI.parse("http://crystal-lang.org")
-  # # => #<URI:0x1068a7e40 @scheme="http", @host="crystal-lang.org", ... >
-  # uri.scheme
-  # # => "http"
-  # uri.host
-  # # => "crystal-lang.org"
+  # uri = URI.parse("http://crystal-lang.org") # => #<URI:0x1068a7e40 @scheme="http", @host="crystal-lang.org", ... >
+  # uri.scheme                                 # => "http"
+  # uri.host                                   # => "crystal-lang.org"
   # ```
-  def self.parse(raw_url : String)
-    if m = RFC3986_URI.match(raw_url)
-      query = m["query"]?
-      scheme = m["scheme"]?
-      opaque = m["path_rootless"]?
-      if opaque
-        opaque = opaque + "?#{query}" if query
-      else
-        userinfo = m["userinfo"]?
-        host = m["host"]?
-        port = m["port"]?.try(&.to_i)
-        path = m["path_abempty"]? || m["path_absolute"]? || m["path_empty"]?
-        fragment = m["fragment"]?
-      end
-    elsif m = RFC3986_relative_ref.match(raw_url)
-      userinfo = m["userinfo"]?
-      host = m["host"]?
-      port = m["port"]?.try(&.to_i)
-      path = m["path_abempty"]? || m["path_absolute"]? || m["path_noscheme"]? || m["path_empty"]?
-      query = m["query"]?
-      fragment = m["fragment"]?
-    else
-      raise "bad URI(is not URI?): #{raw_url}"
-    end
-
-    if userinfo
-      split = userinfo.split(":")
-      user = split[0]
-      password = split[1]?
-    else
-      user = password = nil
-    end
-
-    new scheme: scheme, host: host, port: port, path: path, query: query, user: user, password: password, fragment: fragment, opaque: opaque
+  def self.parse(raw_url : String) : URI
+    URI::Parser.new(raw_url).run.uri
   end
 
-  # Returns the user-information component containing the provided username and password.
+  # URL-decode a `String`.
+  #
+  # If *plus_to_space* is `true`, it replace plus character (`0x2B`) to ' '.
+  # e.g. `application/x-www-form-urlencoded` wants this replace.
+  #
+  # ```
+  # URI.unescape("%27Stop%21%27%20said%20Fred")                  # => "'Stop!' said Fred"
+  # URI.unescape("%27Stop%21%27+said+Fred", plus_to_space: true) # => "'Stop!' said Fred"
+  # ```
+  def self.unescape(string : String, plus_to_space = false) : String
+    String.build { |io| unescape(string, io, plus_to_space) }
+  end
+
+  # URL-decode a `String`.
+  #
+  # This method requires block, the block is called with each bytes
+  # whose is less than `0x80`. The bytes that block returns `true`
+  # are not unescaped, other characters are unescaped.
+  def self.unescape(string : String, plus_to_space = false, &block) : String
+    String.build { |io| unescape(string, io, plus_to_space) { |byte| yield byte } }
+  end
+
+  # URL-decode a string and write the result to an `IO`.
+  def self.unescape(string : String, io : IO, plus_to_space = false)
+    self.unescape(string, io, plus_to_space) { false }
+  end
+
+  # URL-decode a `String` and write the result to an `IO`.
+  #
+  # This method requires block.
+  def self.unescape(string : String, io : IO, plus_to_space = false, &block)
+    i = 0
+    bytesize = string.bytesize
+    while i < bytesize
+      byte = string.unsafe_byte_at(i)
+      char = byte.unsafe_chr
+      i = unescape_one(string, bytesize, i, byte, char, io, plus_to_space) { |byte| yield byte }
+    end
+    io
+  end
+
+  # URL-encode a `String`.
+  #
+  # If *space_to_plus* is `true`, it replace space character (0x20) to `'+'` and `'+'` is
+  # encoded to `'%2B'`. e.g. `application/x-www-form-urlencoded` want this replace.
+  #
+  # ```
+  # URI.escape("'Stop!' said Fred")                      # => "%27Stop%21%27%20said%20Fred"
+  # URI.escape("'Stop!' said Fred", space_to_plus: true) # => "%27Stop%21%27+said+Fred"
+  # ```
+  def self.escape(string : String, space_to_plus = false) : String
+    String.build { |io| escape(string, io, space_to_plus) }
+  end
+
+  # URL-encode a `String`.
+  #
+  # This method requires block, the block is called with each characters
+  # whose code is less than `0x80`. The characters that block returns
+  # `true` are not escaped, other characters are escaped.
+  #
+  # ```
+  # # Escape URI path
+  # URI.escape("/foo/file?(1).txt") do |byte|
+  #   URI.unreserved?(byte) || byte.chr == '/'
+  # end
+  # # => "/foo/file%3F%281%29.txt"
+  # ```
+  def self.escape(string : String, space_to_plus = false, &block) : String
+    String.build { |io| escape(string, io, space_to_plus) { |byte| yield byte } }
+  end
+
+  # URL-encode a `String` and write the result to an `IO`.
+  def self.escape(string : String, io : IO, space_to_plus = false)
+    self.escape(string, io, space_to_plus) { |byte| URI.unreserved? byte }
+  end
+
+  # URL-encode a `String` and write the result to an `IO`.
+  #
+  # This method requires block.
+  def self.escape(string : String, io : IO, space_to_plus = false, &block)
+    string.each_byte do |byte|
+      char = byte.unsafe_chr
+      if char == ' ' && space_to_plus
+        io.write_byte '+'.ord.to_u8
+      elsif char.ascii? && yield(byte) && (!space_to_plus || char != '+')
+        io.write_byte byte
+      else
+        io.write_byte '%'.ord.to_u8
+        io.write_byte '0'.ord.to_u8 if byte < 16
+        byte.to_s(16, io, upcase: true)
+      end
+    end
+    io
+  end
+
+  # Returns whether given byte is reserved character defined in
+  # [RFC 3986](https://tools.ietf.org/html/rfc3986).
+  #
+  # Reserved characters are ':', '/', '?', '#', '[', ']', '@', '!',
+  # '$', '&', "'", '(', ')', '*', '+', ',', ';' and '='.
+  def self.reserved?(byte) : Bool
+    char = byte.unsafe_chr
+    '&' <= char <= ',' ||
+      {'!', '#', '$', '/', ':', ';', '?', '@', '[', ']', '='}.includes?(char)
+  end
+
+  # Returns whether given byte is unreserved character defined in
+  # [RFC 3986](https://tools.ietf.org/html/rfc3986).
+  #
+  # Unreserved characters are alphabet, digit, '_', '.', '-', '~'.
+  def self.unreserved?(byte) : Bool
+    char = byte.unsafe_chr
+    char.ascii_alphanumeric? ||
+      {'_', '.', '-', '~'}.includes?(char)
+  end
+
+  # Returns the user-information component containing
+  # the provided username and password.
   #
   # ```
   # uri = URI.parse "http://admin:password@foo.com"
@@ -227,23 +322,110 @@ class URI
     end
   end
 
-  private def userinfo(user, io)
-    escape(user, io)
-    if password = @password
-      io << ':'
-      escape(password, io)
-    end
+  # :nodoc:
+  def self.unescape_one(string, bytesize, i, byte, char, io, plus_to_space = false)
+    self.unescape_one(string, bytesize, i, byte, char, io, plus_to_space) { false }
   end
 
-  private def escape(str, io)
-    str.each_byte do |byte|
-      case byte
-      when ':', '@', '/'
-        io << '%'
-        byte.to_s(16, io, upcase: true)
-      else
+  # :nodoc:
+  # Unescapes one character. Private API
+  def self.unescape_one(string, bytesize, i, byte, char, io, plus_to_space = false)
+    if plus_to_space && char == '+'
+      io.write_byte ' '.ord.to_u8
+      i += 1
+      return i
+    end
+
+    if char == '%' && i < bytesize - 2
+      i += 1
+      first = string.unsafe_byte_at(i)
+      first_num = first.unsafe_chr.to_i? 16
+      unless first_num
         io.write_byte byte
+        return i
       end
+
+      i += 1
+      second = string.unsafe_byte_at(i)
+      second_num = second.unsafe_chr.to_i? 16
+      unless second_num
+        io.write_byte byte
+        io.write_byte first
+        return i
+      end
+
+      encoded = (first_num * 16 + second_num).to_u8
+      i += 1
+      if encoded < 0x80 && yield encoded
+        io.write_byte byte
+        io.write_byte first
+        io.write_byte second
+        return i
+      end
+      io.write_byte encoded
+      return i
+    end
+
+    io.write_byte byte
+    i += 1
+    i
+  end
+
+  # [RFC 3986 6.2.2.3](https://tools.ietf.org/html/rfc3986#section-5.2.4)
+  private def remove_dot_segments(path : String?)
+    return if path.nil?
+
+    result = [] of String
+    while path.size > 0
+      # A.  If the input buffer begins with a prefix of "../" or "./",
+      #     then remove that prefix from the input buffer; otherwise,
+      if path.starts_with?("../")
+        path = path[3..-1]
+      elsif path.starts_with?("./")
+        path = path[2..-1]
+        # B.  if the input buffer begins with a prefix of "/./" or "/.",
+        #     where "." is a complete path segment, then replace that
+        #     prefix with "/" in the input buffer; otherwise,
+      elsif path.starts_with?("/./")
+        path = "/" + path[3..-1]
+      elsif path == "/."
+        path = "/" + path[2..-1]
+        # C.  if the input buffer begins with a prefix of "/../" or "/..",
+        #     where ".." is a complete path segment, then replace that
+        #     prefix with "/" in the input buffer and remove the last
+        #     segment and its preceding "/" (if any) from the output
+        #     buffer; otherwise,
+      elsif path.starts_with?("/../")
+        path = "/" + path[4..-1]
+        result.pop if result.size > 0
+      elsif path == "/.."
+        path = "/" + path[3..-1]
+        result.pop if result.size > 0
+        # D.  if the input buffer consists only of "." or "..", then remove
+        #     that from the input buffer; otherwise,
+      elsif path == ".." || path == "."
+        path = ""
+        # E.  move the first path segment in the input buffer to the end of
+        #     the output buffer, including the initial "/" character (if
+        #     any) and any subsequent characters up to, but not including,
+        #     the next "/" character or the end of the input buffer.
+      else
+        slash_search_idx = path[0] == '/' ? 1 : 0
+        segment_end_idx = path.index("/", slash_search_idx)
+        segment_end_idx ||= path.size
+        result << path[0...segment_end_idx]
+        path = path[segment_end_idx..-1]
+      end
+    end
+
+    result.join
+  end
+
+  private def userinfo(user, io)
+    URI.escape(user, io)
+    if password = @password
+      io << ':'
+      URI.escape(password, io)
     end
   end
 end

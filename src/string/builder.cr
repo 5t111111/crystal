@@ -1,21 +1,28 @@
 require "io"
 
-# Similar to `StringIO`, but optimized for building a single string.
+# Similar to `IO::Memory`, but optimized for building a single string.
 #
 # You should never have to deal with this class. Instead, use `String.build`.
-class String::Builder
-  include IO
+class String::Builder < IO
+  getter bytesize : Int32
+  getter capacity : Int32
+  getter buffer : Pointer(UInt8)
 
-  getter bytesize
+  def initialize(capacity : Int = 64)
+    String.check_capacity_in_bounds(capacity)
 
-  def initialize(capacity = 64)
-    @buffer = GC.malloc_atomic(capacity.to_u32) as UInt8*
+    # Make sure to also be able to hold
+    # the header size plus the trailing zero byte
+    capacity += String::HEADER_SIZE + 1
+    String.check_capacity_in_bounds(capacity)
+
+    @buffer = GC.malloc_atomic(capacity.to_u32).as(UInt8*)
     @bytesize = 0
-    @capacity = capacity
+    @capacity = capacity.to_i
     @finished = false
   end
 
-  def self.build(capacity = 64)
+  def self.build(capacity : Int = 64) : String
     builder = new(capacity)
     yield builder
     builder.to_s
@@ -27,12 +34,12 @@ class String::Builder
     io
   end
 
-  def read(slice : Slice(UInt8))
+  def read(slice : Bytes)
     raise "Not implemented"
   end
 
-  def write(slice : Slice(UInt8))
-    count = slice.length
+  def write(slice : Bytes)
+    count = slice.size
     new_bytesize = real_bytesize + count
     if new_bytesize > @capacity
       resize_to_capacity(Math.pw2ceil(new_bytesize))
@@ -41,7 +48,20 @@ class String::Builder
     slice.copy_to(@buffer + real_bytesize, count)
     @bytesize += count
 
-    count
+    nil
+  end
+
+  def write_byte(byte : UInt8)
+    new_bytesize = real_bytesize + 1
+    if new_bytesize > @capacity
+      resize_to_capacity(Math.pw2ceil(new_bytesize))
+    end
+
+    @buffer[real_bytesize] = byte
+
+    @bytesize += 1
+
+    nil
   end
 
   def buffer
@@ -52,8 +72,30 @@ class String::Builder
     @bytesize == 0
   end
 
+  # Chomps the last byte from the string buffer.
+  # If the byte is `'\n'` and there's a `'\r'` before it, it is also removed.
+  def chomp!(byte : UInt8)
+    if bytesize > 0 && buffer[bytesize - 1] == byte
+      back(1)
+
+      if byte === '\n' && bytesize > 0 && buffer[bytesize - 1] === '\r'
+        back(1)
+      end
+    end
+  end
+
+  # Moves the write pointer, and the resulting string bytesize,
+  # by the given *amount*.
+  def back(amount : Int)
+    unless 0 <= amount <= @bytesize
+      raise ArgumentError.new "Invalid back amount"
+    end
+
+    @bytesize -= amount
+  end
+
   def to_s
-    raise "can only invoke 'to_s' once on String::Builder" if @finished
+    raise "Can only invoke 'to_s' once on String::Builder" if @finished
     @finished = true
 
     write_byte 0_u8
@@ -64,9 +106,9 @@ class String::Builder
       resize_to_capacity(real_bytesize)
     end
 
-    header = @buffer as {Int32, Int32, Int32}*
+    header = @buffer.as({Int32, Int32, Int32}*)
     header.value = {String::TYPE_ID, @bytesize - 1, 0}
-    @buffer as String
+    @buffer.as(String)
   end
 
   private def real_bytesize

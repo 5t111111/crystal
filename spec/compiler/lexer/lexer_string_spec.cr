@@ -1,4 +1,4 @@
-require "../../spec_helper"
+require "../../support/syntax"
 require "./lexer_objects/strings"
 
 describe "Lexer string" do
@@ -132,12 +132,21 @@ describe "Lexer string" do
     tester.string_should_end_correctly
   end
 
-  [['(', ')'], ['[', ']'], ['{', '}'], ['<', '>']].each do |pair|
-    it "lexes simple string with nested %#{pair[0]}" do
-      lexer = Lexer.new("%#{pair[0]}hello #{pair[0]}world#{pair[1]}#{pair[1]}")
+  it "lexes simple string with %|" do
+    lexer = Lexer.new("%|hello|")
+    tester = LexerObjects::Strings.new(lexer)
+
+    tester.string_should_be_delimited_by('|', '|')
+    tester.next_string_token_should_be("hello")
+    tester.string_should_end_correctly
+  end
+
+  [['(', ')'], ['[', ']'], ['{', '}'], ['<', '>']].each do |(left, right)|
+    it "lexes simple string with nested %#{left}" do
+      lexer = Lexer.new("%#{left}hello #{left}world#{right}#{right}")
       tester = LexerObjects::Strings.new(lexer)
 
-      tester.string_should_be_delimited_by(pair[0], pair[1])
+      tester.string_should_be_delimited_by(left, right)
       tester.next_string_token_should_be("hello ")
       tester.next_string_token_should_be_opening
       tester.next_string_token_should_be("world")
@@ -153,9 +162,9 @@ describe "Lexer string" do
 
     tester.string_should_start_correctly
     tester.next_string_token_should_be("Hello, mom! I am HERE.")
-    tester.next_string_token_should_be("HER dress is beautiful.")
-    tester.next_string_token_should_be("HE is OK.")
-    tester.next_string_token_should_be("  HERESY")
+    tester.next_string_token_should_be("\nHER dress is beautiful.")
+    tester.next_string_token_should_be("\nHE is OK.")
+    tester.next_string_token_should_be("\n  HERESY")
     tester.string_should_end_correctly
   end
 
@@ -166,6 +175,16 @@ describe "Lexer string" do
     tester.string_should_start_correctly
     tester.next_string_token_should_be("foo")
     tester.next_string_token_should_be("\n")
+    tester.string_should_end_correctly
+  end
+
+  it "lexes heredoc with \\r\\n" do
+    lexer = Lexer.new("<<-XML\r\nfoo\r\n\nXML")
+    tester = LexerObjects::Strings.new(lexer)
+
+    tester.string_should_start_correctly
+    tester.next_string_token_should_be("foo")
+    tester.next_string_token_should_be("\r\n")
     tester.string_should_end_correctly
   end
 
@@ -185,11 +204,11 @@ describe "Lexer string" do
 
     tester.string_should_start_correctly
     tester.next_string_token_should_be("Hello, mom! I am HERE.")
-    tester.token_should_be_at(line: 1)
-    tester.next_string_token_should_be("HER dress is beautiful.")
-    tester.token_should_be_at(line: 1)
-    tester.next_string_token_should_be("HE is OK.")
-    tester.token_should_be_at(line: 1)
+    tester.token_should_be_at(line: 2)
+    tester.next_string_token_should_be("\nHER dress is beautiful.")
+    tester.token_should_be_at(line: 3)
+    tester.next_string_token_should_be("\nHE is OK.")
+    tester.token_should_be_at(line: 4)
     tester.string_should_end_correctly(false)
     tester.next_token_should_be(:NEWLINE)
     tester.token_should_be_at(line: 5, column: 5)
@@ -212,7 +231,7 @@ describe "Lexer string" do
     token = lexer.next_token
     state = token.delimiter_state
 
-    expect_raises Crystal::SyntaxException, /unterminated heredoc/ do
+    expect_raises Crystal::SyntaxException, "Unterminated heredoc" do
       loop do
         token = lexer.next_string_token state
         break if token.type == :DELIMITER_END
@@ -223,7 +242,7 @@ describe "Lexer string" do
   it "raises on invalid heredoc identifier (<<-HERE A)" do
     lexer = Lexer.new("<<-HERE A\ntest\nHERE\n")
 
-    expect_raises Crystal::SyntaxException, /invalid heredoc identifier/ do
+    expect_raises Crystal::SyntaxException, /invalid character '.+' for heredoc identifier/ do
       lexer.next_token
     end
   end
@@ -231,7 +250,39 @@ describe "Lexer string" do
   it "raises on invalid heredoc identifier (<<-HERE\\n)" do
     lexer = Lexer.new("<<-HERE\\ntest\nHERE\n")
 
-    expect_raises Crystal::SyntaxException, /invalid heredoc identifier/ do
+    expect_raises Crystal::SyntaxException, /invalid character '.+' for heredoc identifier/ do
+      lexer.next_token
+    end
+  end
+
+  it "raises when identifier doesn't start with a leter" do
+    lexer = Lexer.new("<<-123\\ntest\n123\n")
+
+    expect_raises Crystal::SyntaxException, /heredoc identifier starts with invalid character/ do
+      lexer.next_token
+    end
+  end
+
+  it "raises when identifier contains a character not for identifier" do
+    lexer = Lexer.new("<<-aaa.bbb?\\ntest\naaa.bbb?\n")
+
+    expect_raises Crystal::SyntaxException, /invalid character '.+' for heredoc identifier/ do
+      lexer.next_token
+    end
+  end
+
+  it "raises when identifier contains spaces" do
+    lexer = Lexer.new("<<-aaa  bbb\\ntest\naaabbb\n")
+
+    expect_raises Crystal::SyntaxException, /invalid character '.+' for heredoc identifier/ do
+      lexer.next_token
+    end
+  end
+
+  it "raises on unexpected EOF while lexing heredoc" do
+    lexer = Lexer.new("<<-aaa")
+
+    expect_raises Crystal::SyntaxException, "Unexpected EOF on heredoc identifier" do
       lexer.next_token
     end
   end

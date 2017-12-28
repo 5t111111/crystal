@@ -1,7 +1,12 @@
+require "c/stdio"
+
 # :nodoc:
-struct String::Formatter
-  def initialize(string, @args, @io)
-    @reader = CharReader.new(string)
+struct String::Formatter(A)
+  @format_buf : Pointer(UInt8)?
+  @temp_buf : Pointer(UInt8)?
+
+  def initialize(string, @args : A, @io : IO)
+    @reader = Char::Reader.new(string)
     @arg_index = 0
     @temp_buf_len = 0
     @format_buf_len = 0
@@ -38,10 +43,10 @@ struct String::Formatter
   private def consume_substitution
     key = consume_substitution_key '}'
     arg = current_arg
-    if arg.is_a?(Hash)
+    if arg.is_a?(Hash) || arg.is_a?(NamedTuple)
       @io << arg[key]
     else
-      raise ArgumentError.new "one hash required"
+      raise ArgumentError.new "One hash or named tuple required"
     end
   end
 
@@ -49,10 +54,10 @@ struct String::Formatter
     key = consume_substitution_key '>'
     next_char
     arg = current_arg
-    if arg.is_a?(Hash)
+    if arg.is_a?(Hash) || arg.is_a?(NamedTuple)
       target_arg = arg[key]
     else
-      raise ArgumentError.new "one hash required"
+      raise ArgumentError.new "One hash or named tuple required"
     end
     flags = consume_flags
     consume_type flags, target_arg, true
@@ -63,7 +68,7 @@ struct String::Formatter
       loop do
         case current_char
         when '\0'
-          raise ArgumentError.new "malformed name - unmatched parenthesis"
+          raise ArgumentError.new "Malformed name - unmatched parenthesis"
         when end_char
           break
         else
@@ -104,45 +109,65 @@ struct String::Formatter
   end
 
   private def consume_width(flags)
-    if '1' <= current_char <= '9'
-      num, length = consume_number
+    case current_char
+    when '1'..'9'
+      num, size = consume_number
       flags.width = num
-      flags.width_length = length
+      flags.width_size = size
+    when '*'
+      val = consume_dynamic_value
+      flags.width = val
+      flags.width_size = val.to_s.size
     end
     flags
   end
 
   private def consume_precision(flags)
     if current_char == '.'
-      next_char
-      if '1' <= current_char <= '9'
-        num, length = consume_number
+      case next_char
+      when '1'..'9'
+        num, size = consume_number
         flags.precision = num
-        flags.precision_length = length + 1
+        flags.precision_size = size
+      when '*'
+        val = consume_dynamic_value
+        flags.precision = val
+        flags.precision_size = val.to_s.size
       else
         flags.precision = 0
-        flags.precision_length = 1
+        flags.precision_size = 1
       end
     end
     flags
   end
 
+  private def consume_dynamic_value
+    value = current_arg
+    if value.is_a?(Int)
+      next_char
+      next_arg
+      value.to_i
+    else
+      raise ArgumentError.new("Expected dynamic value '*' to be an Int - #{value.inspect} (#{value.class.inspect})")
+    end
+  end
+
   private def consume_number
     num = current_char - '0'
-    length = 1
+    size = 1
     next_char
     while true
       case char = current_char
-      when '0' .. '9'
+      when '0'..'9'
         num *= 10
         num += char - '0'
-        length += 1
+        size += 1
       else
         break
       end
       next_char
     end
-    {num, length}
+    {num, size}
   end
 
   private def consume_type(flags, arg = nil, arg_specified = false)
@@ -168,16 +193,20 @@ struct String::Formatter
     when '%'
       char '%'
     else
-      raise ArgumentError.new("malformed format string - %#{char.inspect}")
+      raise ArgumentError.new("Malformed format string - %#{char.inspect}")
     end
   end
 
   def string(flags, arg, arg_specified)
     arg = next_arg unless arg_specified
 
-    pad arg.to_s.length, flags if flags.left_padding?
+    if precision = flags.precision
+      arg = arg.to_s[0...precision]
+    end
+
+    pad arg.to_s.size, flags if flags.left_padding?
     @io << arg
-    pad arg.to_s.length, flags if flags.right_padding?
+    pad arg.to_s.size, flags if flags.right_padding?
   end
 
   def int(flags, arg, arg_specified)
@@ -208,7 +237,7 @@ struct String::Formatter
         pad_int int, flags
       end
     else
-      raise ArgumentError.new("expected an integer, not #{arg.inspect}")
+      raise ArgumentError.new("Expected an integer, not #{arg.inspect}")
     end
   end
 
@@ -216,26 +245,26 @@ struct String::Formatter
   def float(flags, arg, arg_specified)
     arg = next_arg unless arg_specified
 
-    if arg.responds_to?(:to_f)
-      float = arg.is_a?(Float) ? arg : arg.to_f
+    if arg.responds_to?(:to_f64)
+      float = arg.is_a?(Float64) ? arg : arg.to_f64
 
       format_buf = recreate_float_format_string(flags)
 
       len = flags.width + (flags.precision || 0) + 23
       temp_buf = temp_buf(len)
-      count = LibC.snprintf(temp_buf, LibC::SizeT.cast(len), format_buf, float)
+      count = LibC.snprintf(temp_buf, len, format_buf, float)
 
-      @io.write Slice.new(temp_buf, count)
+      @io.write_utf8 Slice.new(temp_buf, count)
     else
-      raise ArgumentError.new("expected a float, not #{arg.inspect}")
+      raise ArgumentError.new("Expected a float, not #{arg.inspect}")
     end
   end
 
   # Here we rebuild the original format string, like %f or %.2g and use snprintf
   def recreate_float_format_string(flags)
-    capacity = 2 # percent + type
-    capacity += flags.width_length
-    capacity += flags.precision_length
+    capacity = 3 # percent + type + \0
+    capacity += flags.width_size
+    capacity += flags.precision_size + 1 # size + .
     capacity += 1 if flags.plus
     capacity += 1 if flags.minus
     capacity += 1 if flags.zero
@@ -244,7 +273,7 @@ struct String::Formatter
     format_buf = format_buf(capacity)
     original_format_buf = format_buf
 
-    io = PointerIO.new(pointerof(format_buf))
+    io = IO::Memory.new(Bytes.new(format_buf, capacity))
     io << '%'
     io << '+' if flags.plus
     io << '-' if flags.minus
@@ -256,13 +285,14 @@ struct String::Formatter
       io << precision if precision != 0
     end
     io << flags.type
+    io.write_byte 0_u8
 
     original_format_buf
   end
 
   def pad(consumed, flags)
     padding_char = flags.padding_char
-    (flags.width - consumed).times do
+    (flags.width.abs - consumed).times do
       @io << padding_char
     end
   end
@@ -278,7 +308,7 @@ struct String::Formatter
   end
 
   private def current_arg
-    @args.at(@arg_index) { raise ArgumentError.new("too few arguments") }
+    @args.at(@arg_index) { raise ArgumentError.new("Too few arguments") }
   end
 
   def next_arg
@@ -322,30 +352,26 @@ struct String::Formatter
   end
 
   struct Flags
-    property space, sharp, plus, minus, zero, base
-    property width, width_length
-    property type, precision, precision_length
+    property space : Bool, sharp : Bool, plus : Bool, minus : Bool, zero : Bool, base : Int32
+    property width : Int32, width_size : Int32
+    property type : Char, precision : Int32?, precision_size : Int32
 
     def initialize
       @space = @sharp = @plus = @minus = @zero = false
       @width = 0
-      @width_length = 0
+      @width_size = 0
       @base = 10
       @type = ' '
       @precision = nil
-      @precision_length = 0
-    end
-
-    def wants_padding?
-      @width > 0
+      @precision_size = 0
     end
 
     def left_padding?
-      wants_padding? && !@minus
+      @minus ? @width < 0 : @width > 0
     end
 
     def right_padding?
-      wants_padding? && @minus
+      @minus ? @width > 0 : @width < 0
     end
 
     def padding_char

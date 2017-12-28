@@ -5,15 +5,15 @@ require "colorize"
 
 module Screen
   TILES = {
-        0 => {:white, :black},
+        0 => {:white, nil},
         2 => {:black, :white},
-        4 => {:blue,  :white},
+        4 => {:blue, :white},
         8 => {:black, :yellow},
        16 => {:white, :red},
        32 => {:black, :red},
        64 => {:white, :magenta},
-      128 => {:red,   :yellow},
-      256 => {:magenta,  :yellow},
+      128 => {:red, :yellow},
+      256 => {:magenta, :yellow},
       512 => {:white, :yellow},
      1024 => {:white, :yellow},
      2048 => {:white, :yellow},
@@ -21,12 +21,14 @@ module Screen
      8192 => {:white, :black},
     16384 => {:white, :black},
     32768 => {:white, :black},
-    65536 => {:white, :black}
+    65536 => {:white, :black},
   }
 
   def self.colorize_for(tile)
     fg_color, bg_color = TILES[tile]
-    with_color(fg_color).on(bg_color).surround do
+    color = with_color(fg_color)
+    color = color.on(bg_color) if bg_color
+    color.surround do
       yield
     end
   end
@@ -37,13 +39,10 @@ module Screen
 
   def self.read_keypress
     STDIN.raw do |io|
-      input = io.read 1
-      if input == "\e"
-        next_two_bytes = io.read_nonblock(2) rescue nil
-        # third_byte = io.read_nonblock(1) rescue nil
-        input += next_two_bytes if next_two_bytes
-        # input += third_byte if third_byte
-      end
+      buffer = Bytes.new(3)
+      bytes_read = io.read(buffer)
+      return :unknown if bytes_read == 0
+      input = String.new(buffer[0, bytes_read])
 
       case input
       when "\e[A", "w"
@@ -68,8 +67,8 @@ module Screen
 end
 
 class Drawer
-  INNER_CELL_WIDTH = 16
-  INNER_CELL_HEIGHT = 6
+  INNER_CELL_WIDTH  = 16
+  INNER_CELL_HEIGHT =  6
 
   def initialize
     @n = 0
@@ -78,11 +77,11 @@ class Drawer
     @content_line = false
   end
 
-  def set_current_row row
+  def set_current_row(row)
     @current_row = row
   end
 
-  def draw grid
+  def draw(grid)
     @grid = grid
     @n = @grid.size
 
@@ -93,21 +92,21 @@ class Drawer
   def box
     top_border
 
-    (@n-1).times do |row|
+    (@n - 1).times do |row|
       tile row
       mid_border
     end
 
-    tile @n-1
+    tile @n - 1
 
     bottom_border
   end
 
-  def tile row
+  def tile(row)
     set_current_row @grid[row]
 
     INNER_CELL_HEIGHT.times do |i|
-      if i == (@n / 2)+1
+      if i == (@n / 2) + 1
         content_line
       else
         space_line
@@ -139,27 +138,27 @@ class Drawer
     line "└", "─", "┴", "┘"
   end
 
-  def line left, fill, inner, right
+  def line(left, fill, inner, right)
     print left
 
-    (@n-1).times do |cell|
+    (@n - 1).times do |cell|
       cell_line fill, cell
 
       print inner
     end
 
-    cell_line fill, @n-1
+    cell_line fill, @n - 1
 
     puts right
   end
 
-  def cell_line fill, cell
+  def cell_line(fill, cell)
     content = @current_row.at(cell) { "empty" }
     tile_value = (content == "empty" ? 0 : (content.to_i? || 0)).to_i
     content = "" if !@content_line || content == "empty"
 
     fill_size = INNER_CELL_WIDTH / 2
-    fill_size -= content.length / 2
+    fill_size -= content.size / 2
     fill_size -= 2
 
     print fill
@@ -168,7 +167,7 @@ class Drawer
       print fill*fill_size
       print content
       print fill*fill_size
-      print fill if content.length % 2 == 0
+      print fill if content.size % 2 == 0
     end
     print fill
   end
@@ -203,7 +202,7 @@ class Game
     elsif lost?
       end_game "You lost!"
     else
-      raise "Game loop quitted unexpectedly"
+      raise "Game loop quit unexpectedly"
     end
   end
 
@@ -224,7 +223,7 @@ class Game
 
     empty_cells = @grid.map(&.count &.nil?).sum
 
-    fill_cell = empty_cells > 1 ? rand(empty_cells-1)+1 : 1
+    fill_cell = empty_cells > 1 ? rand(empty_cells - 1) + 1 : 1
 
     empty_cell_count = 0
 
@@ -239,14 +238,14 @@ class Game
   end
 
   def each_cell_with_index
-    0.upto(@grid.size-1) do |row|
-      0.upto(@grid.size-1) do |col|
+    0.upto(@grid.size - 1) do |row|
+      0.upto(@grid.size - 1) do |col|
         yield @grid[row][col], row, col
       end
     end
   end
 
-  def execute_action action
+  def execute_action(action)
     if [:up, :down, :left, :right].includes? action
       if can_move_in? action
         shift_grid action
@@ -263,20 +262,20 @@ class Game
     end
   end
 
-  def shift_grid direction
+  def shift_grid(direction)
     drow, dcol = offsets_for direction
     shift_tiles_to_empty_cells direction, drow, dcol
     merge_tiles direction, drow, dcol
     shift_tiles_to_empty_cells direction, drow, dcol
   end
 
-  def shift_tiles_to_empty_cells direction, drow, dcol
+  def shift_tiles_to_empty_cells(direction, drow, dcol)
     modified = true
     while modified
       modified = false
       movable_tiles(direction, drow, dcol) do |tile, row, col|
-        unless @grid[row+drow][col+dcol]
-          @grid[row+drow][col+dcol] = tile
+        unless @grid[row + drow][col + dcol]
+          @grid[row + drow][col + dcol] = tile
           @grid[row][col] = nil
           modified = true
         end
@@ -284,17 +283,17 @@ class Game
     end
   end
 
-  def merge_tiles direction, drow, dcol
+  def merge_tiles(direction, drow, dcol)
     movable_tiles(direction, drow, dcol) do |tile, row, col|
-      if @grid[row+drow][col+dcol] == tile
+      if @grid[row + drow][col + dcol] == tile
         @grid[row][col] = nil
-        @grid[row+drow][col+dcol] = tile*2
+        @grid[row + drow][col + dcol] = tile*2
       end
     end
   end
 
-  def movable_tiles direction, drow, dcol
-    max = @grid.size-1
+  def movable_tiles(direction, drow, dcol)
+    max = @grid.size - 1
     from_row, to_row, from_column, to_column =
       case direction
       when :up, :left
@@ -314,18 +313,18 @@ class Game
     end
   end
 
-  def can_move_in? direction
+  def can_move_in?(direction)
     drow, dcol = offsets_for direction
 
     movable_tiles(direction, drow, dcol) do |tile, row, col|
-      target_tile = @grid[row+drow][col+dcol]
+      target_tile = @grid[row + drow][col + dcol]
       return true if !target_tile || target_tile == tile
     end
 
     false
   end
 
-  def offsets_for direction
+  def offsets_for(direction)
     drow = dcol = 0
 
     case direction
@@ -344,16 +343,16 @@ class Game
     {drow, dcol}
   end
 
-  def to_border? direction, row, col, drow, dcol
+  def to_border?(direction, row, col, drow, dcol)
     case direction
     when :up
-      row+drow < 0
+      row + drow < 0
     when :down
-      row+drow >= @grid.size
+      row + drow >= @grid.size
     when :left
-      col+dcol < 0
+      col + dcol < 0
     when :right
-      col+dcol >= @grid.size
+      col + dcol >= @grid.size
     else
       false
     end
@@ -369,10 +368,10 @@ class Game
 
   def can_move?
     can_move_in?(:up) || can_move_in?(:down) ||
-    can_move_in?(:left) || can_move_in?(:right)
+      can_move_in?(:left) || can_move_in?(:right)
   end
 
-  def end_game msg
+  def end_game(msg)
     puts msg
     exit
   end
